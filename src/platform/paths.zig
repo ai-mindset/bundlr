@@ -151,10 +151,12 @@ pub const Paths = struct {
                 };
                 defer dir.close();
 
-                // Look for python3.x executable
+                // Look for python3.x executable (exclude -config scripts)
                 var iterator = dir.iterate();
                 while (try iterator.next()) |entry| {
-                    if (entry.kind == .file and std.mem.startsWith(u8, entry.name, "python3.")) {
+                    if (entry.kind == .file and
+                        std.mem.startsWith(u8, entry.name, "python3.") and
+                        !std.mem.endsWith(u8, entry.name, "-config")) {
                         return try std.fs.path.join(self.allocator, &.{ python_install_dir, "bin", entry.name });
                     }
                 }
