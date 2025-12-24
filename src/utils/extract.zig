@@ -4,6 +4,7 @@
 const std = @import("std");
 const fs = std.fs;
 const builtin = @import("builtin");
+const paths_module = @import("../platform/paths.zig");
 
 /// Archive type detection based on file extension
 pub const ArchiveType = enum {
@@ -26,20 +27,14 @@ pub const ArchiveType = enum {
 
 /// Extract a single file to a directory
 /// This is the original extractFile function from main.zig
-pub fn extractFile(target_dir: []const u8, filename: []const u8, data: []const u8) !void {
-    // Ensure target directory exists - use makePath for cross-platform directory creation
-    if (fs.path.isAbsolute(target_dir)) {
-        fs.makeDirAbsolute(target_dir) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
-    } else {
-        try fs.cwd().makePath(target_dir);
-    }
+pub fn extractFile(allocator: std.mem.Allocator, target_dir: []const u8, filename: []const u8, data: []const u8) !void {
+    // Ensure target directory exists - use ensureDirExists for consistent cross-platform directory creation
+    var paths = paths_module.Paths.init(allocator);
+    try paths.ensureDirExists(target_dir);
 
     // Build full path and write file - use path.join for cross-platform compatibility
-    const file_path = try fs.path.join(std.heap.page_allocator, &.{ target_dir, filename });
-    defer std.heap.page_allocator.free(file_path);
+    const file_path = try fs.path.join(allocator, &.{ target_dir, filename });
+    defer allocator.free(file_path);
 
     if (fs.path.isAbsolute(target_dir)) {
         const file = try fs.createFileAbsolute(file_path, .{});
@@ -58,7 +53,7 @@ pub fn extractArchive(allocator: std.mem.Allocator, target_dir: []const u8, file
 
     switch (archive_type) {
         .single_file => {
-            return extractFile(target_dir, filename, data);
+            return extractFile(allocator, target_dir, filename, data);
         },
         .tar_gz => {
             return extractTarGz(allocator, target_dir, data);
@@ -142,11 +137,9 @@ fn extractTarGzWithSystemTar(allocator: std.mem.Allocator, target_dir: []const u
 
 /// Extract ZIP using system unzip command
 fn extractZipWithSystemUnzip(allocator: std.mem.Allocator, target_dir: []const u8, archive_path: []const u8) !void {
-    // Ensure target directory exists
-    fs.makeDirAbsolute(target_dir) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
+    // Ensure target directory exists - use ensureDirExists for consistent cross-platform directory creation
+    var paths = paths_module.Paths.init(allocator);
+    try paths.ensureDirExists(target_dir);
 
     // Use different commands based on platform
     switch (builtin.os.tag) {
@@ -211,12 +204,13 @@ test "archive type detection" {
 }
 
 test "extractFile creates file with correct content" {
+    const allocator = std.testing.allocator;
     // Use a temporary directory
     const test_dir = "test_extract_dir";
     defer std.fs.cwd().deleteTree(test_dir) catch {};
 
     const test_data = "Hello from bundlr extract module!";
-    try extractFile(test_dir, "test_output.txt", test_data);
+    try extractFile(allocator, test_dir, "test_output.txt", test_data);
 
     // Read it back and verify
     var path_buf: [fs.max_path_bytes]u8 = undefined;

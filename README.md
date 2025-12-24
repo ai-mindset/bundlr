@@ -1,48 +1,112 @@
 # bundlr 📦
 
-A Python application packaging tool written in Zig that creates standalone executables.
+Run ANY Python package from PyPI or Git with zero setup! No Python installation required, no virtual environments to manage—just download and go.
 
-## What bundlr Does
+## What is bundlr?
 
-bundlr packages Python applications into portable executables by:
+bundlr lets you instantly run Python command-line tools without installation hassles. Just type `bundlr` followed by the package name, and bundlr handles everything else automatically.
 
-1. **Downloading Python** - Fetches Python 3.13 from python-build-standalone on first run
-2. **Creating Virtual Environment** - Sets up isolated environment for your app
-3. **Installing Packages** - Uses pip to install your Python package from PyPI
-4. **Executing Application** - Runs your app with forwarded command-line arguments
+**Perfect for:**
+- 🚀 Trying out Python CLI tools without installing them
+- 🔧 Running tools from GitHub repositories
+- 🧪 Testing different versions of packages
+- ⚡ Quick one-off commands without setup
 
-## Platform Support
+## Installation
 
-**Current Status**: Functional on Linux with system dependencies
+### Option 1: Download Pre-Built Binary (Easiest!)
 
-**System Requirements**:
-- `curl` command available in PATH (for downloads)
-- `tar` command available (for archive extraction)
-- Internet connection on first run
+> **Note:** Pre-built binaries will be available on the [Releases page](https://github.com/ai-mindset/bundlr/releases) once the first version is released. Until then, please use Option 2 (build from source).
 
-**Platform-Specific Notes**:
-- **Linux**: Fully tested and working
-- **macOS**: Core functionality implemented, requires testing
-- **Windows**: Core functionality implemented, requires testing and may need PowerShell
+When releases are available, download the binary for your platform:
 
-## Usage
+- **Linux**: `bundlr-linux-x86_64`
+- **macOS (Intel)**: `bundlr-macos-x86_64`
+- **macOS (Apple Silicon)**: `bundlr-macos-aarch64`
+- **Windows**: `bundlr-windows-x86_64.exe`
 
-Set environment variables and run:
+After downloading:
 
+**On Linux:**
 ```bash
-# Required
-export BUNDLR_PROJECT_NAME=cowsay
+# Replace with your actual downloaded filename
+chmod +x bundlr-linux-x86_64
 
-# Optional (with defaults)
-export BUNDLR_PROJECT_VERSION=1.0.0    # Project version
-export BUNDLR_PYTHON_VERSION=3.13      # Python version to use
+# Rename and move to PATH (recommended for easy access)
+sudo mv bundlr-linux-x86_64 /usr/local/bin/bundlr
 
-# Build and run
-zig build
-./zig-out/bin/bundlr -- -t "Hello World"
+# Now you can run it from anywhere
+bundlr cowsay "Hello!"
 ```
 
-**Example Output**:
+**On macOS:**
+```bash
+# Replace with your actual downloaded filename (intel or aarch64)
+chmod +x bundlr-macos-x86_64
+
+# Rename and move to PATH (recommended for easy access)
+sudo mv bundlr-macos-x86_64 /usr/local/bin/bundlr
+
+# Now you can run it from anywhere
+bundlr cowsay "Hello!"
+```
+
+**On Windows:**
+```cmd
+REM Run directly with the full filename
+bundlr-windows-x86_64.exe cowsay "Hello!"
+
+REM Or rename it to bundlr.exe for easier use
+rename bundlr-windows-x86_64.exe bundlr.exe
+bundlr.exe cowsay "Hello!"
+```
+
+### Option 2: Build from Source
+
+If you have [Zig](https://ziglang.org/) installed:
+
+```bash
+# Clone the repository
+git clone https://github.com/ai-mindset/bundlr.git
+cd bundlr
+
+# Build bundlr
+zig build
+
+# The binary will be in zig-out/bin/bundlr
+```
+
+## Quick Start Examples
+
+Once installed, try these commands:
+
+```bash
+# ASCII art with cowsay
+bundlr cowsay -t "Hello World"
+
+# Make HTTP requests with httpie
+bundlr httpie GET httpbin.org/json
+
+# Format Python code with black
+bundlr black --help
+
+# Run tools directly from GitHub (Python projects only)
+bundlr https://github.com/psf/black --help
+bundlr https://github.com/ai-mindset/distil --help
+```
+
+## How It Works
+
+When you run a command with bundlr, it automatically:
+
+1. **Downloads Python** - Gets Python 3.13 if you don't have it
+2. **Creates an isolated environment** - No conflicts with your system
+3. **Installs the package** - Uses pip for PyPI packages or uv for Git repos
+4. **Runs your command** - Passes all your arguments through
+5. **Cleans up** - Removes temporary files automatically
+
+### Example Output
+
 ```
 🚀 Bundlr: Bootstrapping cowsay v1.0.0 (Python 3.13)
 📥 Ensuring Python 3.13 is available...
@@ -60,12 +124,39 @@ zig build
 ✅ Application completed successfully
 ```
 
-## Current Limitations
+## Platform Support
 
-- Requires system tools (`curl`, `tar`) to be available
-- Downloads Python runtime on first execution (~122MB)
-- Limited to packages available on PyPI
-- No offline mode or embedded distributions yet
+- **Linux (x86_64)**: ✅ Fully supported and tested
+- **macOS (Intel & Apple Silicon)**: ✅ Supported
+- **Windows**: ✅ Supported
+
+## Troubleshooting
+
+**"Permission denied" error on Linux/macOS?**  
+Make sure the file is executable: `chmod +x bundlr-linux-x86_64` (use your actual filename)
+
+**Command not found after installation?**  
+- If you moved it to `/usr/local/bin/bundlr`, make sure `/usr/local/bin` is in your PATH
+- Or run it with the full path: `./bundlr-linux-x86_64` from the download directory
+- On Windows, either use the full filename `bundlr-windows-x86_64.exe` or rename it to `bundlr.exe`
+
+**Python download fails?**  
+Check your internet connection. bundlr needs to download Python (~60MB) the first time you use it.
+
+## For Maintainers: Creating Releases
+
+To create a new release with automatically built binaries:
+
+```bash
+# Tag the release
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The GitHub Actions workflow will automatically:
+- Build bundlr for all platforms (Linux, macOS Intel/ARM, Windows)
+- Create a GitHub release with all binaries attached
+- Generate release notes from commits
 
 ## License
 
