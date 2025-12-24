@@ -87,12 +87,13 @@ bundlr cowsay -t "Hello World"
 # Make HTTP requests with httpie
 bundlr httpie GET httpbin.org/json
 
-# Get help for any tool
-bundlr ty --help
+# Format Python code with black
+bundlr black --help
 
-# Run tools directly from GitHub
-bundlr https://github.com/astral-sh/ruff --help
-bundlr https://github.com/ai-mindset/distil serve --help
+# Run tools directly from GitHub (Python projects only)
+bundlr https://github.com/psf/black --help
+bundlr https://github.com/pallets/click --help
+bundlr https://github.com/yaml/pyyaml --help
 ```
 
 ## How It Works
