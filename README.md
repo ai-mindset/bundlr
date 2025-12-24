@@ -16,7 +16,9 @@ bundlr lets you instantly run Python command-line tools without installation has
 
 ### Option 1: Download Pre-Built Binary (Easiest!)
 
-Download the latest version for your platform from the [Releases page](https://github.com/ai-mindset/bundlr/releases):
+> **Note:** Pre-built binaries will be available on the [Releases page](https://github.com/ai-mindset/bundlr/releases) once the first version is released. Until then, please use Option 2 (build from source).
+
+When releases are available, download the binary for your platform:
 
 - **Linux**: `bundlr-linux-x86_64`
 - **macOS (Intel)**: `bundlr-macos-x86_64`
@@ -25,23 +27,38 @@ Download the latest version for your platform from the [Releases page](https://g
 
 After downloading:
 
-**On Linux/macOS:**
+**On Linux:**
 ```bash
-# Make it executable
-chmod +x bundlr-*
+# Replace with your actual downloaded filename
+chmod +x bundlr-linux-x86_64
 
-# Move it to your PATH (optional but recommended)
-sudo mv bundlr-* /usr/local/bin/bundlr
+# Rename and move to PATH (recommended for easy access)
+sudo mv bundlr-linux-x86_64 /usr/local/bin/bundlr
 
-# Or run it directly
-./bundlr-* cowsay "Hello!"
+# Now you can run it from anywhere
+bundlr cowsay "Hello!"
+```
+
+**On macOS:**
+```bash
+# Replace with your actual downloaded filename (intel or aarch64)
+chmod +x bundlr-macos-x86_64
+
+# Rename and move to PATH (recommended for easy access)
+sudo mv bundlr-macos-x86_64 /usr/local/bin/bundlr
+
+# Now you can run it from anywhere
+bundlr cowsay "Hello!"
 ```
 
 **On Windows:**
 ```cmd
-# Just run it from where you downloaded it, or
-# Add the folder to your PATH for easier access
+REM Run directly with the full filename
 bundlr-windows-x86_64.exe cowsay "Hello!"
+
+REM Or rename it to bundlr.exe for easier use
+rename bundlr-windows-x86_64.exe bundlr.exe
+bundlr.exe cowsay "Hello!"
 ```
 
 ### Option 2: Build from Source
@@ -115,14 +132,16 @@ When you run a command with bundlr, it automatically:
 
 ## Troubleshooting
 
-**"Permission denied" error?**  
-On Linux/macOS, make sure the file is executable: `chmod +x bundlr`
+**"Permission denied" error on Linux/macOS?**  
+Make sure the file is executable: `chmod +x bundlr-linux-x86_64` (use your actual filename)
 
-**Can't find bundlr after download?**  
-Make sure it's in your PATH or run it with `./bundlr` (or full path on Windows)
+**Command not found after installation?**  
+- If you moved it to `/usr/local/bin/bundlr`, make sure `/usr/local/bin` is in your PATH
+- Or run it with the full path: `./bundlr-linux-x86_64` from the download directory
+- On Windows, either use the full filename `bundlr-windows-x86_64.exe` or rename it to `bundlr.exe`
 
 **Python download fails?**  
-Check your internet connection. bundlr needs to download Python the first time.
+Check your internet connection. bundlr needs to download Python (~60MB) the first time you use it.
 
 ## For Maintainers: Creating Releases
 
