@@ -247,3 +247,174 @@ test "legacy getCacheDir compatibility" {
     try std.testing.expect(cache_dir.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, cache_dir, "bundlr_cache") != null);
 }
+
+test "ensureDirExists creates nested cache directories" {
+    const allocator = std.testing.allocator;
+    var paths = Paths.init(allocator);
+
+    const temp_dir = try paths.getTemporaryDir();
+    defer allocator.free(temp_dir);
+
+    const test_cache_dir = try std.fs.path.join(allocator, &.{ temp_dir, "bundlr_cache_test" });
+    defer allocator.free(test_cache_dir);
+
+    const nested_dir = try std.fs.path.join(allocator, &.{ test_cache_dir, "level1", "level2", "level3" });
+    defer allocator.free(nested_dir);
+
+    // Cleanup before test
+    std.fs.deleteTreeAbsolute(test_cache_dir) catch {};
+    defer std.fs.deleteTreeAbsolute(test_cache_dir) catch {};
+
+    // Test that ensureDirExists creates the full path
+    try paths.ensureDirExists(nested_dir);
+
+    // Verify all levels exist
+    std.fs.accessAbsolute(test_cache_dir, .{}) catch unreachable;
+    std.fs.accessAbsolute(nested_dir, .{}) catch unreachable;
+}
+
+test "ensureDirExists handles absolute and relative paths correctly" {
+    const allocator = std.testing.allocator;
+    var paths = Paths.init(allocator);
+
+    const temp_dir = try paths.getTemporaryDir();
+    defer allocator.free(temp_dir);
+
+    // Test absolute path
+    const abs_test_dir = try std.fs.path.join(allocator, &.{ temp_dir, "abs_cache_test", "subdir" });
+    defer allocator.free(abs_test_dir);
+
+    std.fs.deleteTreeAbsolute(abs_test_dir) catch {};
+    defer std.fs.deleteTreeAbsolute(abs_test_dir) catch {};
+
+    try paths.ensureDirExists(abs_test_dir);
+    std.fs.accessAbsolute(abs_test_dir, .{}) catch unreachable;
+
+    // Test relative path (from current working directory)
+    const rel_test_dir = "test_rel_cache/subdir";
+    std.fs.cwd().deleteTree(rel_test_dir) catch {};
+    defer std.fs.cwd().deleteTree("test_rel_cache") catch {};
+
+    try paths.ensureDirExists(rel_test_dir);
+    std.fs.cwd().access(rel_test_dir, .{}) catch unreachable;
+}
+
+test "getBundlrCacheDir returns platform-appropriate paths" {
+    const allocator = std.testing.allocator;
+    var paths = Paths.init(allocator);
+
+    const cache_dir = try paths.getBundlrCacheDir();
+    defer allocator.free(cache_dir);
+
+    // Verify cache directory path is non-empty and contains expected components
+    try std.testing.expect(cache_dir.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, cache_dir, "bundlr_cache") != null);
+
+    // Test platform-specific path characteristics
+    switch (builtin.os.tag) {
+        .windows => {
+            // Windows paths should contain drive letters or UNC paths
+            const has_drive_letter = cache_dir.len >= 3 and cache_dir[1] == ':';
+            const has_unc_path = std.mem.startsWith(u8, cache_dir, "\\\\");
+            try std.testing.expect(has_drive_letter or has_unc_path);
+        },
+        .macos => {
+            // macOS should use ~/Library/Caches
+            try std.testing.expect(std.mem.indexOf(u8, cache_dir, "Library/Caches") != null or
+                                  std.mem.indexOf(u8, cache_dir, "/tmp") != null);
+        },
+        .linux => {
+            // Linux should use ~/.cache or $XDG_CACHE_HOME
+            try std.testing.expect(std.mem.indexOf(u8, cache_dir, ".cache") != null or
+                                  std.mem.indexOf(u8, cache_dir, "/tmp") != null);
+        },
+        else => {
+            // Other Unix-like systems should fallback to /tmp
+            try std.testing.expect(std.mem.indexOf(u8, cache_dir, "/tmp") != null);
+        },
+    }
+}
+
+test "cache directories are writable after creation" {
+    const allocator = std.testing.allocator;
+    var paths = Paths.init(allocator);
+
+    const temp_dir = try paths.getTemporaryDir();
+    defer allocator.free(temp_dir);
+
+    const test_subdir = try std.fs.path.join(allocator, &.{ temp_dir, "bundlr_write_test" });
+    defer allocator.free(test_subdir);
+
+    // Clean up before test
+    std.fs.deleteTreeAbsolute(test_subdir) catch {};
+    defer std.fs.deleteTreeAbsolute(test_subdir) catch {};
+
+    // Create the directory structure
+    try paths.ensureDirExists(test_subdir);
+
+    // Test that we can write to the directory
+    const test_file = try std.fs.path.join(allocator, &.{ test_subdir, "test_file.txt" });
+    defer allocator.free(test_file);
+
+    const file = try std.fs.createFileAbsolute(test_file, .{});
+    defer file.close();
+    try file.writeAll("Test cache directory write");
+
+    // Verify we can read it back
+    const read_file = try std.fs.openFileAbsolute(test_file, .{});
+    defer read_file.close();
+
+    var buffer: [100]u8 = undefined;
+    const bytes_read = try read_file.readAll(&buffer);
+    try std.testing.expectEqualStrings("Test cache directory write", buffer[0..bytes_read]);
+}
+
+test "bundlr cache structure creation" {
+    const allocator = std.testing.allocator;
+    var paths = Paths.init(allocator);
+
+    const temp_dir = try paths.getTemporaryDir();
+    defer allocator.free(temp_dir);
+
+    const test_cache = try std.fs.path.join(allocator, &.{ temp_dir, "test_bundlr_cache" });
+    defer allocator.free(test_cache);
+
+    // Clean up before test
+    std.fs.deleteTreeAbsolute(test_cache) catch {};
+    defer std.fs.deleteTreeAbsolute(test_cache) catch {};
+
+    // Test all bundlr cache subdirectory structures
+    const python_dir = try std.fs.path.join(allocator, &.{ test_cache, "python", "3.13" });
+    defer allocator.free(python_dir);
+
+    const downloads_dir = try std.fs.path.join(allocator, &.{ test_cache, "downloads" });
+    defer allocator.free(downloads_dir);
+
+    const venv_dir = try std.fs.path.join(allocator, &.{ test_cache, "venvs", "myapp-py3.13" });
+    defer allocator.free(venv_dir);
+
+    const git_archives_dir = try std.fs.path.join(allocator, &.{ test_cache, "git_archives" });
+    defer allocator.free(git_archives_dir);
+
+    const git_extracts_dir = try std.fs.path.join(allocator, &.{ test_cache, "git_extracts", "project-12345" });
+    defer allocator.free(git_extracts_dir);
+
+    const uv_dir = try std.fs.path.join(allocator, &.{ test_cache, "uv", "0.9.18" });
+    defer allocator.free(uv_dir);
+
+    // Create all directory structures
+    try paths.ensureDirExists(python_dir);
+    try paths.ensureDirExists(downloads_dir);
+    try paths.ensureDirExists(venv_dir);
+    try paths.ensureDirExists(git_archives_dir);
+    try paths.ensureDirExists(git_extracts_dir);
+    try paths.ensureDirExists(uv_dir);
+
+    // Verify all directories exist
+    std.fs.accessAbsolute(python_dir, .{}) catch unreachable;
+    std.fs.accessAbsolute(downloads_dir, .{}) catch unreachable;
+    std.fs.accessAbsolute(venv_dir, .{}) catch unreachable;
+    std.fs.accessAbsolute(git_archives_dir, .{}) catch unreachable;
+    std.fs.accessAbsolute(git_extracts_dir, .{}) catch unreachable;
+    std.fs.accessAbsolute(uv_dir, .{}) catch unreachable;
+}
