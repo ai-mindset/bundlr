@@ -127,10 +127,10 @@ pub const DistributionManager = struct {
     pub fn getDistributionInfo(self: *Self, python_version: []const u8) DistributionInfo {
         _ = self;
         // Map major.minor versions to full versions available in releases
-        const full_python_version = if (std.mem.eql(u8, python_version, "3.13"))
+        const full_python_version = if (std.mem.eql(u8, python_version, "3.14"))
+            "3.14.2"
+        else if (std.mem.eql(u8, python_version, "3.13"))
             "3.13.11"
-        else if (std.mem.eql(u8, python_version, "3.12"))
-            "3.12.8"  // Update to latest 3.12.x available
         else
             python_version;
 
@@ -374,7 +374,7 @@ test "distribution info creation" {
     const allocator = std.testing.allocator;
 
     const dist_info = DistributionInfo{
-        .python_version = "3.13.0",
+        .python_version = "3.14.0",
         .platform = .linux,
         .architecture = .x86_64,
         .build_version = "20241016",
@@ -383,7 +383,7 @@ test "distribution info creation" {
     const filename = try dist_info.filename(allocator);
     defer allocator.free(filename);
 
-    try std.testing.expect(std.mem.indexOf(u8, filename, "3.13.0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, filename, "3.14.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, filename, "x86_64") != null);
     try std.testing.expect(std.mem.indexOf(u8, filename, "unknown-linux-gnu") != null);
     try std.testing.expect(std.mem.endsWith(u8, filename, ".tar.gz"));
@@ -400,7 +400,7 @@ test "distribution info URL generation" {
     const allocator = std.testing.allocator;
 
     const dist_info = DistributionInfo{
-        .python_version = "3.13.0",
+        .python_version = "3.14.0",
         .platform = .linux,
         .architecture = .x86_64,
         .build_version = "20241016",
@@ -410,6 +410,6 @@ test "distribution info URL generation" {
     defer allocator.free(url);
 
     try std.testing.expect(std.mem.indexOf(u8, url, "github.com/indygreg/python-build-standalone") != null);
-    try std.testing.expect(std.mem.indexOf(u8, url, "3.13.0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, url, "3.14.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, url, "20241016") != null);
 }
