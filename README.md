@@ -1,72 +1,101 @@
 # bundlr 📦
 
-A Python application packaging tool written in Zig that creates standalone executables.
+Run any Python CLI tool instantly without installation hassles. **Double-click for a friendly GUI** or use the command line for power users.
 
-## What bundlr Does
+**Perfect for:**
+- 🚀 Trying Python CLI tools without installing them
+- 🔧 Running tools from GitHub repositories
+- 🧪 Testing packages quickly
+- 📦 One-off commands without setup
 
-bundlr packages Python applications into portable executables by:
+## 🚀 Quick Start
 
-1. **Downloading Python** - Fetches Python 3.13 from python-build-standalone on first run
-2. **Creating Virtual Environment** - Sets up isolated environment for your app
-3. **Installing Packages** - Uses pip to install your Python package from PyPI
-4. **Executing Application** - Runs your app with forwarded command-line arguments
+### GUI Mode (Easiest!)
+1. **Download** bundlr for your platform from [Releases](https://github.com/ai-mindset/bundlr/releases/latest)
+2. **Double-click** the executable
+3. **Enter** a package name (e.g., "cowsay") and arguments
+4. **Watch** bundlr work in a live terminal window!
 
-## Platform Support
-
-**Current Status**: Functional on Linux with system dependencies
-
-**System Requirements**:
-- `curl` command available in PATH (for downloads)
-- `tar` command available (for archive extraction)
-- Internet connection on first run
-
-**Platform-Specific Notes**:
-- **Linux**: Fully tested and working
-- **macOS**: Core functionality implemented, requires testing
-- **Windows**: Core functionality implemented, requires testing and may need PowerShell
-
-## Usage
-
-Set environment variables and run:
-
+### Command Line Mode
 ```bash
-# Required
-export BUNDLR_PROJECT_NAME=cowsay
+# Run any PyPI package
+bundlr cowsay -t "Hello World"
+bundlr httpie GET httpbin.org/json
 
-# Optional (with defaults)
-export BUNDLR_PROJECT_VERSION=1.0.0    # Project version
-export BUNDLR_PYTHON_VERSION=3.13      # Python version to use
+# Run from GitHub
+bundlr https://github.com/psf/black --help
+bundlr https://github.com/ai-mindset/distil --help
 
-# Build and run
-zig build
-./zig-out/bin/bundlr -- -t "Hello World"
+# Launch GUI mode explicitly
+bundlr --gui
 ```
 
-**Example Output**:
+## 📥 Installation
+
+**Download from [Releases](https://github.com/ai-mindset/bundlr/releases/latest):**
+- **Linux**: `bundlr-linux-x86_64`
+- **macOS**: `bundlr-macos-x86_64` (Intel) or `bundlr-macos-aarch64` (Apple Silicon)
+- **Windows**: `bundlr-windows-x86_64.exe`
+
+### Unix (Linux & macOS)
+```bash
+# Make executable and install
+chmod +x bundlr-*
+sudo mv bundlr-* /usr/local/bin/bundlr
+
+# Test it
+bundlr cowsay -t "Hello!"
 ```
-🚀 Bundlr: Bootstrapping cowsay v1.0.0 (Python 3.13)
-📥 Ensuring Python 3.13 is available...
-📦 Setting up virtual environment...
-📋 Installing project package: cowsay
-🎯 Executing application...
- _____________
-< Hello World >
- -------------
-        \   ^__^
-         \  (oo)\_______
-            (__)\       )\/\
-                ||----w |
-                ||     ||
-✅ Application completed successfully
+
+### Windows
+```cmd
+# Rename for easier use (optional)
+rename bundlr-windows-x86_64.exe bundlr.exe
+
+# Test it
+bundlr cowsay -t "Hello!"
 ```
 
-## Current Limitations
+### Build from Source
+```bash
+git clone https://github.com/ai-mindset/bundlr.git
+cd bundlr && zig build
+# Binary in zig-out/bin/bundlr
+```
 
-- Requires system tools (`curl`, `tar`) to be available
-- Downloads Python runtime on first execution (~122MB)
-- Limited to packages available on PyPI
-- No offline mode or embedded distributions yet
+## 🎯 How It Works
 
-## License
+bundlr automatically handles everything:
+
+1. **🐍 Downloads Python** (3.14) if needed
+2. **📦 Creates isolated environment** - no system conflicts
+3. **⬇️ Installs packages** - pip for PyPI, uv for Git repos
+4. **▶️ Runs your command** - with all your arguments
+5. **🧹 Cleans up** - removes temporary files
+
+### Two Ways to Use
+
+| **GUI Mode** | **CLI Mode** |
+|--------------|--------------|
+| `bundlr` (no args) → Double-click behavior | `bundlr <package> [args]` → Command line |
+| Friendly dialogues for package/args | Direct command execution |
+| Live terminal output window | Output in current terminal |
+
+## 🛠 Platform Support
+
+✅ **Linux** (x86_64) - Fully supported
+✅ **macOS** (Intel & Apple Silicon) - Native support
+✅ **Windows** (x86_64) - Complete support
+
+## ⚠️ Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| **"Permission denied"** (Unix) | `chmod +x bundlr-*` |
+| **"Command not found"** | Add to PATH or use `./bundlr-*` |
+| **Python download fails** | Check internet connection (~60MB download) |
+| **GUI doesn't work** | Use CLI mode: `bundlr <package>` |
+
+## 📄 License
 
 MIT

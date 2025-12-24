@@ -300,8 +300,8 @@ pub const DistributionManager = struct {
                     std.fs.deleteFileAbsolute(source_path) catch {};
                 },
                 .directory => {
-                    // Recursively move directory
-                    std.fs.makeDirAbsolute(target_path) catch {};
+                    // Recursively move directory - ensure target directory exists
+                    try self.paths.ensureDirExists(target_path);
                     try self.moveDirectoryContents(source_path, target_path);
                     std.fs.deleteDirAbsolute(source_path) catch {};
                 },
