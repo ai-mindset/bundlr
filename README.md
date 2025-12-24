@@ -22,11 +22,11 @@ zig build
 
 bundlr automatically handles everything:
 
-✅ **Downloads Python 3.14** - Gets latest Python if needed
-✅ **Creates Virtual Environment** - Isolated environment for each app
-✅ **Installs Dependencies** - Uses pip (PyPI) or uv (Git) for fast installs
-✅ **Runs Your App** - Executes with your arguments
-✅ **Cleans Up** - Removes temporary files
+✅ **Downloads Python 3.14** - Gets latest Python if needed  
+✅ **Creates Virtual Environment** - Isolated environment for each app  
+✅ **Installs Dependencies** - Uses pip (PyPI) or uv (Git) for fast installs  
+✅ **Runs Your App** - Executes with your arguments  
+✅ **Cleans Up** - Removes temporary files  
 
 ## Example Output
 
