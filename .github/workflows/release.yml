@@ -1,0 +1,82 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-linux
+            artifact_name: bundlr-linux-x86_64
+          - os: macos-latest
+            target: x86_64-macos
+            artifact_name: bundlr-macos-x86_64
+          - os: macos-latest
+            target: aarch64-macos
+            artifact_name: bundlr-macos-aarch64
+          - os: windows-latest
+            target: x86_64-windows
+            artifact_name: bundlr-windows-x86_64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build bundlr
+        run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+
+      - name: Rename artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp zig-out/bin/bundlr ${{ matrix.artifact_name }}
+
+      - name: Rename artifact (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          copy zig-out\bin\bundlr.exe ${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/bundlr-linux-x86_64/bundlr-linux-x86_64
+            artifacts/bundlr-macos-x86_64/bundlr-macos-x86_64
+            artifacts/bundlr-macos-aarch64/bundlr-macos-aarch64
+            artifacts/bundlr-windows-x86_64.exe/bundlr-windows-x86_64.exe
+          draft: false
+          prerelease: false
+          generate_release_notes: true
