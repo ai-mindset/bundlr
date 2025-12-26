@@ -1,12 +1,8 @@
 # bundlr 📦
 
-Run ANY Python package from PyPI or Git with zero setup! No Python installation required, no virtual environments to manage—just download and go.
-
-## What is bundlr?
-
 bundlr lets you instantly run Python command-line tools without installation hassles. Just type `bundlr` followed by the package name, and bundlr handles everything else automatically.
 
-**Perfect for:**
+**Use case examples:**
 - 🚀 Trying out Python CLI tools without installing them
 - 🔧 Running tools from GitHub repositories
 - 🧪 Testing different versions of packages
@@ -27,24 +23,16 @@ When releases are available, download the binary for your platform:
 
 After downloading:
 
-**On Linux:**
+**On Linux/macOS:**
 ```bash
 # Replace with your actual downloaded filename
-chmod +x bundlr-linux-x86_64
+chmod +x bundlr-linux-x86_64 # Linux
+# or 
+chmod +x bundlr-macos-x86_64 # macOS
 
 # Rename and move to PATH (recommended for easy access)
 sudo mv bundlr-linux-x86_64 /usr/local/bin/bundlr
-
-# Now you can run it from anywhere
-bundlr cowsay "Hello!"
-```
-
-**On macOS:**
-```bash
-# Replace with your actual downloaded filename (intel or aarch64)
-chmod +x bundlr-macos-x86_64
-
-# Rename and move to PATH (recommended for easy access)
+# or 
 sudo mv bundlr-macos-x86_64 /usr/local/bin/bundlr
 
 # Now you can run it from anywhere
@@ -99,7 +87,7 @@ bundlr https://github.com/ai-mindset/distil --help
 
 When you run a command with bundlr, it automatically:
 
-1. **Downloads Python** - Gets Python 3.13 if you don't have it
+1. **Downloads Python** - Gets Python 3.14 if you don't have it
 2. **Creates an isolated environment** - No conflicts with your system
 3. **Installs the package** - Uses pip for PyPI packages or uv for Git repos
 4. **Runs your command** - Passes all your arguments through
@@ -108,8 +96,8 @@ When you run a command with bundlr, it automatically:
 ### Example Output
 
 ```
-🚀 Bundlr: Bootstrapping cowsay v1.0.0 (Python 3.13)
-📥 Ensuring Python 3.13 is available...
+🚀 Bundlr: Bootstrapping cowsay v1.0.0 (Python 3.14)
+📥 Ensuring Python 3.14 is available...
 📦 Setting up virtual environment...
 📋 Installing project package: cowsay
 🎯 Executing application...

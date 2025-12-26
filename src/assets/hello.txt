@@ -1,2 +1,0 @@
-Hello from bundlr!
-This is a test asset file for the PyApp Zig port.
