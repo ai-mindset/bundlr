@@ -366,7 +366,16 @@ fn testHttpModule(allocator: std.mem.Allocator) bool {
     print("    ✓ Progress callback working\n", .{});
 
     print("  → Testing error handling for invalid URLs...\n", .{});
-    const result = client.downloadFile("not-a-url", "/tmp/test-download", null);
+    // Create a proper temporary file path for testing (won't be created since URL is invalid)
+    var paths = bundlr.platform.paths.Paths.init(allocator);
+    const temp_dir = paths.getTemporaryDir() catch "/tmp";
+    defer if (!std.mem.eql(u8, temp_dir, "/tmp")) allocator.free(temp_dir);
+
+    const test_file = std.fs.path.join(allocator, &.{ temp_dir, "bundlr_test_download" }) catch "/tmp/bundlr_test_download";
+    defer if (!std.mem.eql(u8, test_file, "/tmp/bundlr_test_download")) allocator.free(test_file);
+    defer std.fs.deleteFileAbsolute(test_file) catch {}; // Cleanup in case file was somehow created
+
+    const result = client.downloadFile("not-a-url", test_file, null);
     if (result) {
         print("    ❌ Invalid URL was accepted\n", .{});
         return false;

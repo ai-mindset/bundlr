@@ -346,10 +346,10 @@ test "uv platform detection" {
     const platform = Platform.current();
     const arch = Architecture.current();
 
-    // Just test that we can get platform strings
-    _ = platform.toString();
-    _ = arch.toString();
-    _ = platform.archiveExtension();
+    // Test that platform and architecture detection works
+    try std.testing.expect(platform.toString().len > 0);
+    try std.testing.expect(arch.toString().len > 0);
+    try std.testing.expect(platform.archiveExtension().len > 0);
 }
 
 test "uv distribution info" {

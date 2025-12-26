@@ -124,8 +124,7 @@ pub const DistributionManager = struct {
     }
 
     /// Get distribution info for the specified Python version
-    pub fn getDistributionInfo(self: *Self, python_version: []const u8) DistributionInfo {
-        _ = self;
+    pub fn getDistributionInfo(_: *Self, python_version: []const u8) DistributionInfo {
         // Map major.minor versions to full versions available in releases
         const full_python_version = if (std.mem.eql(u8, python_version, "3.14"))
             "3.14.2"

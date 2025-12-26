@@ -40,7 +40,7 @@ pub const Bundlr = struct {
 
     /// Bootstrap a Python application
     /// This is the main entry point for bundlr functionality
-    pub fn bootstrap(self: *Bundlr, bootstrap_config: BootstrapConfig) !void {
+    pub fn bootstrap(_: *Bundlr, _: BootstrapConfig) !void {
         // TODO: Implement the full bootstrap process:
         // 1. Validate configuration
         // 2. Get or create cache directory
@@ -48,13 +48,11 @@ pub const Bundlr = struct {
         // 4. Create virtual environment
         // 5. Install packages
         // 6. Execute application
-        _ = self;
-        _ = bootstrap_config;
         std.log.info("Bootstrap process not yet implemented", .{});
+        return error.NotImplemented;
     }
 
-    pub fn deinit(self: *Bundlr) void {
-        _ = self;
+    pub fn deinit(_: *Bundlr) void {
         // TODO: Add cleanup when needed
     }
 };

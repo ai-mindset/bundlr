@@ -70,10 +70,7 @@ pub fn extractArchive(allocator: std.mem.Allocator, target_dir: []const u8, file
 /// Extract a tar.gz archive
 /// Note: This is a placeholder implementation - full tar.gz support requires
 /// implementing gzip decompression and tar parsing
-fn extractTarGz(allocator: std.mem.Allocator, target_dir: []const u8, data: []const u8) !void {
-    _ = allocator;
-    _ = target_dir;
-    _ = data;
+fn extractTarGz(_: std.mem.Allocator, _: []const u8, _: []const u8) !void {
     // TODO: Implement tar.gz extraction
     // For now, this would require either:
     // 1. Using system tar command via subprocess
@@ -86,10 +83,7 @@ fn extractTarGz(allocator: std.mem.Allocator, target_dir: []const u8, data: []co
 /// Extract a ZIP archive
 /// Note: This is a placeholder implementation - full ZIP support requires
 /// implementing ZIP format parsing and decompression
-fn extractZip(allocator: std.mem.Allocator, target_dir: []const u8, data: []const u8) !void {
-    _ = allocator;
-    _ = target_dir;
-    _ = data;
+fn extractZip(_: std.mem.Allocator, _: []const u8, _: []const u8) !void {
     // TODO: Implement ZIP extraction
     // This would require implementing ZIP format parsing
     std.log.warn("ZIP extraction not yet implemented", .{});

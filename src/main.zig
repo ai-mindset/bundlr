@@ -279,7 +279,8 @@ fn tryRunEntryPoint(
     var cmd_args: [32][]const u8 = undefined; // Fixed size array
     var arg_count: usize = 0;
 
-    cmd_args[arg_count] = entry_point_path; arg_count += 1;
+    cmd_args[arg_count] = entry_point_path;
+    arg_count += 1;
 
     // Add application arguments
     for (app_args) |arg| {
@@ -309,14 +310,20 @@ fn executeWithPython(
     // Try different execution methods
     if (config.entry_point) |entry_point| {
         // Use specified entry point
-        cmd_args[arg_count] = python_exe; arg_count += 1;
-        cmd_args[arg_count] = "-c"; arg_count += 1;
-        cmd_args[arg_count] = entry_point; arg_count += 1;
+        cmd_args[arg_count] = python_exe;
+        arg_count += 1;
+        cmd_args[arg_count] = "-c";
+        arg_count += 1;
+        cmd_args[arg_count] = entry_point;
+        arg_count += 1;
     } else {
         // Try to run as module
-        cmd_args[arg_count] = python_exe; arg_count += 1;
-        cmd_args[arg_count] = "-m"; arg_count += 1;
-        cmd_args[arg_count] = config.project_name; arg_count += 1;
+        cmd_args[arg_count] = python_exe;
+        arg_count += 1;
+        cmd_args[arg_count] = "-m";
+        arg_count += 1;
+        cmd_args[arg_count] = config.project_name;
+        arg_count += 1;
     }
 
     // Add application arguments
