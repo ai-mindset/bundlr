@@ -38,7 +38,7 @@ jobs:
           version: 0.15.2
 
       - name: Build bundlr
-        run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+        run: zig build -Doptimize=ReleaseFast -Dtarget="${{ matrix.target }}"
 
       - name: Rename artifact (Unix)
         if: runner.os != 'Windows'
