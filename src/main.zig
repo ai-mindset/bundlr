@@ -68,14 +68,11 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     var cmd_args: [32][]const u8 = undefined;
     var cmd_count: usize = 0;
 
-    // Use zig build run to execute bundlr
-    cmd_args[cmd_count] = "zig";
-    cmd_count += 1;
-    cmd_args[cmd_count] = "build";
-    cmd_count += 1;
-    cmd_args[cmd_count] = "run";
-    cmd_count += 1;
-    cmd_args[cmd_count] = "--";
+    // Get the current executable path
+    const exe_path = try std.fs.selfExePathAlloc(allocator);
+    defer allocator.free(exe_path);
+
+    cmd_args[cmd_count] = exe_path;
     cmd_count += 1;
     cmd_args[cmd_count] = package_result.text;
     cmd_count += 1;
@@ -494,40 +491,30 @@ fn executeWithPython(
 
 /// Print usage information
 fn printUsage(program_name: []const u8) void {
-    print("Bundlr - Python Application Packager\n", .{});
-    print("Run ANY Python package from PyPI or Git with zero setup!\n", .{});
+    print("bundlr - Execute Python packages from PyPI or Git repositories\n", .{});
 
-    print("\n🎨 DEFAULT (GUI MODE):\n", .{});
-    print("  {s}                                   # Double-click or run with no args for GUI\n", .{program_name});
+    print("\nUSAGE:\n", .{});
+    print("  {s}                                   # GUI mode (default)\n", .{program_name});
+    print("  {s} <package> [args...]               # Run PyPI package\n", .{program_name});
+    print("  {s} <repository> [args...]            # Run from Git repository\n", .{program_name});
 
-    print("\n🚀 COMMAND LINE USAGE:\n", .{});
-    print("  {s} <package_or_repo> [arguments...]\n", .{program_name});
+    print("\nEXAMPLES:\n", .{});
+    print("  {s} cowsay \"Hello World\"              # PyPI package with arguments\n", .{program_name});
+    print("  {s} httpie GET httpbin.org/json        # HTTP client tool\n", .{program_name});
+    print("  {s} youtube-dl --help                  # Show package help\n", .{program_name});
+    print("  {s} https://github.com/psf/black       # Git repository\n", .{program_name});
 
-    print("\n📦 PyPI PACKAGES:\n", .{});
-    print("  {s} cowsay \"Hello World\"              # Run cowsay with arguments\n", .{program_name});
-    print("  {s} httpie GET httpbin.org/json        # Run httpie (HTTP client)\n", .{program_name});
-    print("  {s} youtube-dl --help                  # Run youtube-dl help\n", .{program_name});
-    print("  {s} black --check .                    # Run black code formatter\n", .{program_name});
-
-    print("\n🔗 GIT REPOSITORIES:\n", .{});
-    print("  {s} https://github.com/psf/black       # Run from Git repo\n", .{program_name});
-    print("  {s} github.com/user/repo --help        # GitHub short syntax\n", .{program_name});
-
-    print("\n🎯 OPTIONS:\n", .{});
+    print("\nOPTIONS:\n", .{});
     print("  -h, --help              Show this help message\n", .{});
     print("      --gui               Launch GUI mode explicitly\n", .{});
 
-    print("\n🔧 ENVIRONMENT VARIABLES (optional):\n", .{});
+    print("\nENVIRONMENT:\n", .{});
     print("  BUNDLR_PYTHON_VERSION   Python version (default: 3.14)\n", .{});
     print("  BUNDLR_GIT_BRANCH       Git branch name (default: main)\n", .{});
     print("  BUNDLR_CACHE_DIR        Custom cache directory\n", .{});
 
-    print("\n✨ It's that simple! Bundlr automatically:\n", .{});
-    print("   • Downloads and installs Python if needed\n", .{});
-    print("   • Creates isolated virtual environments\n", .{});
-    print("   • Installs packages and dependencies\n", .{});
-    print("   • Runs your application\n", .{});
-    print("   • Cleans up temporary files\n", .{});
+    print("\nBundlr automatically manages Python distributions, virtual environments,\n", .{});
+    print("and package installations for seamless execution.\n", .{});
 }
 
 test "bundlr config integration" {
