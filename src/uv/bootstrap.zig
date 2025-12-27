@@ -178,7 +178,6 @@ pub const UvManager = struct {
         };
     }
 
-
     /// Check if uv is already installed and cached
     pub fn isCached(self: *UvManager, version: []const u8) !bool {
         const uv_exe = try self.getUvExecutable(version);
@@ -258,8 +257,7 @@ pub const UvManager = struct {
         try extract.extractUsingSystemTools(self.allocator, version_dir, archive_path);
 
         // Make uv executable (Unix-like systems)
-        const platform = Platform.current();
-        if (platform == .linux or platform == .macos) {
+        if (comptime builtin.os.tag != .windows) {
             const uv_exe = try self.getUvExecutable(version);
             defer self.allocator.free(uv_exe);
 
@@ -380,3 +378,4 @@ test "uv manager creation" {
     // Test basic functionality
     try std.testing.expect(manager.allocator.vtable == allocator.vtable);
 }
+
