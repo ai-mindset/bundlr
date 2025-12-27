@@ -39,13 +39,9 @@ jobs:
 
       - name: Build bundlr
         run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
-        env:
-          # Ensure environment variables that affect the build are not set
-          # to maintain reproducibility. These optional env vars can embed
-          # values into the binary, so we explicitly unset them.
-          BUNDLR_PROJECT_NAME: ""
-          BUNDLR_PROJECT_VERSION: ""
-          BUNDLR_PYTHON_VERSION: ""
+        # Note: We intentionally do not set BUNDLR_PROJECT_NAME, BUNDLR_PROJECT_VERSION,
+        # or BUNDLR_PYTHON_VERSION environment variables to maintain reproducibility.
+        # These optional env vars can embed values into the binary.
 
       - name: Rename artifact (Unix)
         if: runner.os != 'Windows'
@@ -97,20 +93,26 @@ jobs:
       - name: Flatten artifacts directory
         run: |
           mkdir -p release-files
-          find artifacts -type f -exec cp {} release-files/ \;
+          # Copy each artifact to release-files, preserving unique names
+          # The artifact structure is: artifacts/<artifact-name>/<artifact-name>
+          for artifact_dir in artifacts/*/; do
+            cp -v "${artifact_dir}"* release-files/ || true
+          done
           ls -lh release-files/
 
       - name: Generate combined SHA256SUMS file
         run: |
           cd release-files
-          # Generate checksums for all binaries
+          # Generate checksums for binary files only (exclude .sha256 files)
           shopt -s nullglob
-          for file in bundlr-*; do
-            if [[ ! "$file" == *.sha256 ]]; then
+          checksums_generated=0
+          for file in bundlr-linux-* bundlr-macos-* bundlr-windows-*.exe; do
+            if [[ -f "$file" && ! "$file" == *.sha256 ]]; then
               shasum -a 256 "$file" >> SHA256SUMS
+              checksums_generated=1
             fi
           done
-          if [ ! -f SHA256SUMS ]; then
+          if [ "$checksums_generated" -eq 0 ]; then
             echo "Error: No binaries found to checksum"
             exit 1
           fi
