@@ -44,7 +44,7 @@ chmod +x bundlr-*
 sudo mv bundlr-* /usr/local/bin/bundlr
 
 # Test it
-bundlr cowsay "Hello!"
+bundlr cowsay -t "Hello!"
 ```
 
 ### Windows
