@@ -53,7 +53,7 @@ bundlr cowsay "Hello!"
 rename bundlr-windows-x86_64.exe bundlr.exe
 
 # Test it
-bundlr cowsay "Hello!"
+bundlr cowsay -t "Hello!"
 ```
 
 ### Build from Source
@@ -78,9 +78,8 @@ bundlr automatically handles everything:
 | **GUI Mode** | **CLI Mode** |
 |--------------|--------------|
 | `bundlr` (no args) → Double-click behavior | `bundlr <package> [args]` → Command line |
-| Friendly dialogs for package/args | Direct command execution |
+| Friendly dialogues for package/args | Direct command execution |
 | Live terminal output window | Output in current terminal |
-| Perfect for beginners | Perfect for power users |
 
 ## 🛠 Platform Support
 
