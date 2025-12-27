@@ -19,15 +19,19 @@ Run any Python CLI tool instantly without installation hassles. **Double-click f
 ### Command Line Mode
 ```bash
 # Run any PyPI package
-bundlr cowsay -t "Hello World"
-bundlr httpie GET httpbin.org/json
+$ bundlr cowsay -t "Hello World"
+# or
+$ bundlr httpie GET httpbin.org/json
+# ...
 
 # Run from GitHub
-bundlr https://github.com/psf/black --help
-bundlr https://github.com/ai-mindset/distil --help
+$ bundlr https://github.com/psf/black --help
+# or
+$ bundlr https://github.com/ai-mindset/distil --help
+# ...
 
-# Launch GUI mode explicitly
-bundlr --gui
+# Launch GUI mode explicitly from the CLI
+$ bundlr --gui
 ```
 
 ## 📥 Installation
@@ -40,27 +44,27 @@ bundlr --gui
 ### Unix (Linux & macOS)
 ```bash
 # Make executable and install
-chmod +x bundlr-*
-sudo mv bundlr-* /usr/local/bin/bundlr
+$ chmod +x bundlr-*
+$ sudo mv bundlr-* /usr/local/bin/bundlr
 
 # Test it
-bundlr cowsay -t "Hello!"
+$ bundlr cowsay -t "Hello!"
 ```
 
 ### Windows
 ```cmd
 # Rename for easier use (optional)
-rename bundlr-windows-x86_64.exe bundlr.exe
+> rename bundlr-windows-x86_64.exe bundlr.exe
 
 # Test it
-bundlr cowsay -t "Hello!"
+> bundlr cowsay -t "Hello!"
 ```
 
 ### Build from Source
 ```bash
-git clone https://github.com/ai-mindset/bundlr.git
-cd bundlr && zig build
-# Binary in zig-out/bin/bundlr
+$ git clone https://github.com/ai-mindset/bundlr.git
+$ cd bundlr && zig build
+# Binary is saved in zig-out/bin/bundlr
 ```
 
 ## 🎯 How It Works
