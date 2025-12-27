@@ -107,6 +107,14 @@ jobs:
             exit 1
           fi
 
+      - name: Set executable permissions
+        run: |
+          # Ensure Unix binaries have execute permissions
+          # This is critical - without this, downloaded binaries won't run
+          chmod +x release-files/bundlr-linux-* release-files/bundlr-macos-* 2>/dev/null || true
+          echo "Permissions after chmod:"
+          ls -lh release-files/
+
       - name: Generate combined SHA256SUMS file
         run: |
           cd release-files
@@ -165,6 +173,12 @@ jobs:
 
             # Verify checksum
             echo "$(cat bundlr-linux-x86_64.sha256)  bundlr-linux-x86_64" | shasum -a 256 -c -
+
+            # Make executable (required on Unix systems)
+            chmod +x bundlr-linux-x86_64
+
+            # Run it
+            ./bundlr-linux-x86_64 --help
             ```
 
             **Windows (PowerShell):**
