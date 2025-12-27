@@ -68,6 +68,8 @@ Install the [GitHub CLI](https://cli.github.com/):
 - Linux: See [installation instructions](https://github.com/cli/cli#installation)
 - Windows: Download from [releases page](https://github.com/cli/cli/releases)
 
+**Note**: Requires GitHub CLI v2.40.0 or later for attestation support.
+
 #### Verify Build Provenance
 
 ```bash
@@ -119,7 +121,7 @@ shasum -a 256 zig-out/bin/bundlr
 
 **Important Note**: Zig builds are mostly reproducible, but some factors may cause differences:
 
-1. **Zig Version**: Must match exactly (check `.github/workflows/release.yml` for the version - currently 0.15.2)
+1. **Zig Version**: Must match exactly (check `.github/workflows/release.yml` for the exact version used in CI)
 2. **Build Flags**: Must use `-Doptimize=ReleaseFast` and correct `-Dtarget=`
 3. **Environment Variables**: The build uses optional environment variables that should NOT be set:
    - `BUNDLR_PROJECT_NAME`
@@ -145,7 +147,7 @@ Even with these factors, the functional behavior and security of the binary shou
 
 1. ❌ **DO NOT use the binary**
 2. 🔍 Ensure you're using the correct repository: `ai-mindset/bundlr`
-3. 🔄 Update GitHub CLI: `gh version` (should be v2.40.0+)
+3. 🔄 Update GitHub CLI: `gh version` (should be v2.40.0 or later for attestation support)
 4. 🚨 If it still fails, [report it immediately](https://github.com/ai-mindset/bundlr/issues/new)
 
 ## Security Best Practices

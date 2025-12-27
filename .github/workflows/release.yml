@@ -58,7 +58,7 @@ jobs:
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
             # Use PowerShell for reliable checksum on Windows
-            powershell -Command "(Get-FileHash -Algorithm SHA256 '${{ matrix.artifact_name }}').Hash.ToLower()" > "${{ matrix.artifact_name }}.sha256"
+            powershell -Command "(Get-FileHash -Algorithm SHA256 \"${{ matrix.artifact_name }}\").Hash.ToLower()" > "${{ matrix.artifact_name }}.sha256"
           else
             shasum -a 256 "${{ matrix.artifact_name }}" | awk '{print $1}' > "${{ matrix.artifact_name }}.sha256"
           fi
@@ -96,9 +96,16 @@ jobs:
           # Copy each artifact to release-files, preserving unique names
           # The artifact structure is: artifacts/<artifact-name>/<artifact-name>
           for artifact_dir in artifacts/*/; do
-            cp -v "${artifact_dir}"* release-files/ || true
+            if ! cp -v "${artifact_dir}"* release-files/ 2>/dev/null; then
+              echo "Warning: Failed to copy from ${artifact_dir}"
+            fi
           done
           ls -lh release-files/
+          # Verify we have files
+          if [ -z "$(ls -A release-files/)" ]; then
+            echo "Error: No files copied to release-files/"
+            exit 1
+          fi
 
       - name: Generate combined SHA256SUMS file
         run: |
