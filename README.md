@@ -25,11 +25,20 @@ When releases are available, download the binary for your platform:
 - **macOS (Apple Silicon)**: `bundlr-macos-aarch64`
 - **Windows**: `bundlr-windows-x86_64.exe`
 
+**🔒 Security Note:** All binaries include SHA256 checksums and SLSA build provenance attestations. See [VERIFICATION.md](VERIFICATION.md) for instructions on verifying downloaded binaries.
+
 After downloading:
 
 **On Linux:**
 ```bash
-# Replace with your actual downloaded filename
+# Download binary
+curl -LO https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-linux-x86_64
+
+# Verify checksum (recommended)
+curl -LO https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-linux-x86_64.sha256
+echo "$(cat bundlr-linux-x86_64.sha256)  bundlr-linux-x86_64" | shasum -a 256 -c -
+
+# Make executable
 chmod +x bundlr-linux-x86_64
 
 # Rename and move to PATH (recommended for easy access)
@@ -41,7 +50,14 @@ bundlr cowsay "Hello!"
 
 **On macOS:**
 ```bash
-# Replace with your actual downloaded filename (intel or aarch64)
+# Download binary (replace with your architecture: x86_64 or aarch64)
+curl -LO https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-macos-x86_64
+
+# Verify checksum (recommended)
+curl -LO https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-macos-x86_64.sha256
+echo "$(cat bundlr-macos-x86_64.sha256)  bundlr-macos-x86_64" | shasum -a 256 -c -
+
+# Make executable
 chmod +x bundlr-macos-x86_64
 
 # Rename and move to PATH (recommended for easy access)
@@ -52,13 +68,19 @@ bundlr cowsay "Hello!"
 ```
 
 **On Windows:**
-```cmd
-REM Run directly with the full filename
-bundlr-windows-x86_64.exe cowsay "Hello!"
+```powershell
+# Download binary
+Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-windows-x86_64.exe" -OutFile "bundlr-windows-x86_64.exe"
 
-REM Or rename it to bundlr.exe for easier use
-rename bundlr-windows-x86_64.exe bundlr.exe
-bundlr.exe cowsay "Hello!"
+# Verify checksum (recommended)
+Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-windows-x86_64.exe.sha256" -OutFile "bundlr-windows-x86_64.exe.sha256"
+$expected = Get-Content bundlr-windows-x86_64.exe.sha256
+$actual = (Get-FileHash bundlr-windows-x86_64.exe -Algorithm SHA256).Hash.ToLower()
+if ($expected -eq $actual) { Write-Host "✓ Checksum verified!" -ForegroundColor Green } else { Write-Host "✗ Checksum mismatch!" -ForegroundColor Red }
+
+# Run directly or rename
+bundlr-windows-x86_64.exe cowsay "Hello!"
+# Or rename: rename bundlr-windows-x86_64.exe bundlr.exe
 ```
 
 ### Option 2: Build from Source
@@ -161,9 +183,26 @@ git push origin v1.0.0
 
 The GitHub Actions workflow will automatically:
 - Build bundlr for all platforms (Linux, macOS Intel/ARM, Windows)
-- Create a GitHub release with all binaries attached
+- Generate SHA256 checksums for each binary
+- Create SLSA build provenance attestations
+- Create a GitHub release with all binaries, checksums, and verification instructions attached
 - Generate release notes from commits
->>>>>>> a22e303 (Implement complete bundlr functionality)
+
+### Verifying Release Integrity
+
+After a release is created, verify it worked correctly:
+
+```bash
+# Download and verify a binary
+gh attestation verify bundlr-linux-x86_64 --repo ai-mindset/bundlr
+
+# Or verify checksums
+curl -LO https://github.com/ai-mindset/bundlr/releases/download/v1.0.0/SHA256SUMS
+curl -LO https://github.com/ai-mindset/bundlr/releases/download/v1.0.0/bundlr-linux-x86_64
+shasum -a 256 -c SHA256SUMS --ignore-missing
+```
+
+See [VERIFICATION.md](VERIFICATION.md) for complete verification instructions.
 
 ## License
 
