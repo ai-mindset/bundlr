@@ -39,6 +39,9 @@ jobs:
 
       - name: Build bundlr
         run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+        # Note: We intentionally do not set BUNDLR_PROJECT_NAME, BUNDLR_PROJECT_VERSION,
+        # or BUNDLR_PYTHON_VERSION environment variables to maintain reproducibility.
+        # These optional env vars can embed values into the binary.
 
       - name: Rename artifact (Unix)
         if: runner.os != 'Windows'
@@ -50,16 +53,34 @@ jobs:
         shell: cmd
         run: copy zig-out\bin\bundlr.exe ${{ matrix.artifact_name }}
 
+      - name: Generate checksum
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # Use PowerShell for reliable checksum on Windows
+            powershell -Command "(Get-FileHash -Algorithm SHA256 \"${{ matrix.artifact_name }}\").Hash.ToLower()" > "${{ matrix.artifact_name }}.sha256"
+          else
+            shasum -a 256 "${{ matrix.artifact_name }}" | awk '{print $1}' > "${{ matrix.artifact_name }}.sha256"
+          fi
+          echo "Checksum for ${{ matrix.artifact_name }}:"
+          cat "${{ matrix.artifact_name }}.sha256"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.artifact_name }}
+            ${{ matrix.artifact_name }}.sha256
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -69,14 +90,122 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts
 
+      - name: Flatten artifacts directory
+        run: |
+          mkdir -p release-files
+          # Copy each artifact to release-files, preserving unique names
+          # The artifact structure is: artifacts/<artifact-name>/<artifact-name>
+          for artifact_dir in artifacts/*/; do
+            if ! cp -v "${artifact_dir}"* release-files/ 2>/dev/null; then
+              echo "Warning: Failed to copy from ${artifact_dir}"
+            fi
+          done
+          ls -lh release-files/
+          # Verify we have files
+          if [ -z "$(ls -A release-files/)" ]; then
+            echo "Error: No files copied to release-files/"
+            exit 1
+          fi
+
+      - name: Set executable permissions
+        run: |
+          # Ensure Unix binaries have execute permissions
+          # This is critical - without this, downloaded binaries won't run
+          chmod +x release-files/bundlr-linux-* release-files/bundlr-macos-* 2>/dev/null || true
+          echo "Permissions after chmod:"
+          ls -lh release-files/
+
+      - name: Generate combined SHA256SUMS file
+        run: |
+          cd release-files
+          # Generate checksums for binary files only (exclude .sha256 files)
+          # Enable nullglob to handle case where no files match patterns
+          shopt -s nullglob
+          checksums_generated=0
+          for file in bundlr-linux-* bundlr-macos-* bundlr-windows-*.exe; do
+            if [[ -f "$file" && ! "$file" == *.sha256 ]]; then
+              shasum -a 256 "$file" >> SHA256SUMS
+              checksums_generated=1
+            fi
+          done
+          if [ "$checksums_generated" -eq 0 ]; then
+            echo "Error: No binaries found to checksum"
+            exit 1
+          fi
+          echo "Generated SHA256SUMS:"
+          cat SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release-files/bundlr-linux-x86_64
+            release-files/bundlr-macos-x86_64
+            release-files/bundlr-macos-aarch64
+            release-files/bundlr-windows-x86_64.exe
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/bundlr-linux-x86_64/bundlr-linux-x86_64
-            artifacts/bundlr-macos-x86_64/bundlr-macos-x86_64
-            artifacts/bundlr-macos-aarch64/bundlr-macos-aarch64
-            artifacts/bundlr-windows-x86_64.exe/bundlr-windows-x86_64.exe
+            release-files/bundlr-linux-x86_64
+            release-files/bundlr-linux-x86_64.sha256
+            release-files/bundlr-macos-x86_64
+            release-files/bundlr-macos-x86_64.sha256
+            release-files/bundlr-macos-aarch64
+            release-files/bundlr-macos-aarch64.sha256
+            release-files/bundlr-windows-x86_64.exe
+            release-files/bundlr-windows-x86_64.exe.sha256
+            release-files/SHA256SUMS
           draft: false
           prerelease: false
           generate_release_notes: true
+          body: |
+            ## 🔒 Verifying Downloads
+
+            All binaries include SHA256 checksums for verification. Download both the binary and its `.sha256` file to verify:
+
+            **Linux/macOS:**
+            ```bash
+            # Download binary and checksum
+            curl -LO https://github.com/ai-mindset/bundlr/releases/download/${{ github.ref_name }}/bundlr-linux-x86_64
+            curl -LO https://github.com/ai-mindset/bundlr/releases/download/${{ github.ref_name }}/bundlr-linux-x86_64.sha256
+
+            # Verify checksum
+            echo "$(cat bundlr-linux-x86_64.sha256)  bundlr-linux-x86_64" | shasum -a 256 -c -
+
+            # Make executable (required on Unix systems)
+            chmod +x bundlr-linux-x86_64
+
+            # Run it
+            ./bundlr-linux-x86_64 --help
+            ```
+
+            **Windows (PowerShell):**
+            ```powershell
+            # Download binary and checksum
+            Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/${{ github.ref_name }}/bundlr-windows-x86_64.exe" -OutFile "bundlr-windows-x86_64.exe"
+            Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/${{ github.ref_name }}/bundlr-windows-x86_64.exe.sha256" -OutFile "bundlr-windows-x86_64.exe.sha256"
+
+            # Verify checksum
+            $expected = (Get-Content bundlr-windows-x86_64.exe.sha256).Trim()
+            $actual = (Get-FileHash bundlr-windows-x86_64.exe -Algorithm SHA256).Hash.ToLower()
+            if ($expected -eq $actual) {
+                Write-Host "✓ Checksum verified!" -ForegroundColor Green
+            } else {
+                Write-Host "✗ Checksum mismatch!" -ForegroundColor Red
+            }
+            ```
+
+            You can also verify the complete `SHA256SUMS` file for all binaries.
+
+            ### 🛡️ Build Provenance
+
+            This release includes [SLSA build provenance attestations](https://slsa.dev/) generated by GitHub Actions. You can verify the authenticity and build process using the GitHub CLI:
+
+            ```bash
+            # Install GitHub CLI if needed: https://cli.github.com/
+            gh attestation verify bundlr-linux-x86_64 --repo ai-mindset/bundlr
+            ```
+
+            This ensures the binaries were built by our official CI pipeline and haven't been tampered with.
