@@ -117,7 +117,7 @@ shasum -a 256 zig-out/bin/bundlr
 
 ### Understanding Build Reproducibility
 
-**Important Note**: Zig builds are *mostly* reproducible, but some factors may cause differences:
+**Important Note**: Zig builds are mostly reproducible, but some factors may cause differences:
 
 1. **Zig Version**: Must match exactly (check `.github/workflows/release.yml` for the version - currently 0.15.2)
 2. **Build Flags**: Must use `-Doptimize=ReleaseFast` and correct `-Dtarget=`

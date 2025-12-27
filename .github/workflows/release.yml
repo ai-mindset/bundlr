@@ -61,7 +61,8 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            certutil -hashfile "${{ matrix.artifact_name }}" SHA256 | grep -v "SHA256" | grep -v "CertUtil" | tr -d '[:space:]' > "${{ matrix.artifact_name }}.sha256"
+            # Use PowerShell for reliable checksum on Windows
+            powershell -Command "(Get-FileHash -Algorithm SHA256 '${{ matrix.artifact_name }}').Hash.ToLower()" > "${{ matrix.artifact_name }}.sha256"
           else
             shasum -a 256 "${{ matrix.artifact_name }}" | awk '{print $1}' > "${{ matrix.artifact_name }}.sha256"
           fi
@@ -103,11 +104,16 @@ jobs:
         run: |
           cd release-files
           # Generate checksums for all binaries
+          shopt -s nullglob
           for file in bundlr-*; do
             if [[ ! "$file" == *.sha256 ]]; then
               shasum -a 256 "$file" >> SHA256SUMS
             fi
           done
+          if [ ! -f SHA256SUMS ]; then
+            echo "Error: No binaries found to checksum"
+            exit 1
+          fi
           echo "Generated SHA256SUMS:"
           cat SHA256SUMS
 
