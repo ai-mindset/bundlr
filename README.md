@@ -31,7 +31,7 @@ After downloading:
 
 **On Linux:**
 ```bash
-# Download binary
+# Download binary (replace VERSION with actual version like v1.0.0)
 curl -LO https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-linux-x86_64
 
 # Verify checksum (recommended)
@@ -50,7 +50,7 @@ bundlr cowsay "Hello!"
 
 **On macOS:**
 ```bash
-# Download binary (replace with your architecture: x86_64 or aarch64)
+# Download binary (replace VERSION with actual version like v1.0.0, and choose x86_64 or aarch64)
 curl -LO https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-macos-x86_64
 
 # Verify checksum (recommended)
@@ -69,7 +69,7 @@ bundlr cowsay "Hello!"
 
 **On Windows:**
 ```powershell
-# Download binary
+# Download binary (replace VERSION with actual version like v1.0.0)
 Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-windows-x86_64.exe" -OutFile "bundlr-windows-x86_64.exe"
 
 # Verify checksum (recommended)

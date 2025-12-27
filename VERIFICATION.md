@@ -18,7 +18,7 @@ Every release includes SHA256 checksums for all binaries. This is the fastest wa
 #### Linux/macOS
 
 ```bash
-# Download the binary and its checksum
+# Download the binary and its checksum (replace VERSION with actual version like v1.0.0)
 curl -LO https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-linux-x86_64
 curl -LO https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-linux-x86_64.sha256
 
@@ -31,7 +31,7 @@ You should see: `bundlr-linux-x86_64: OK`
 #### Windows (PowerShell)
 
 ```powershell
-# Download the binary and its checksum
+# Download the binary and its checksum (replace VERSION with actual version like v1.0.0)
 Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-windows-x86_64.exe" -OutFile "bundlr-windows-x86_64.exe"
 Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-windows-x86_64.exe.sha256" -OutFile "bundlr-windows-x86_64.exe.sha256"
 
