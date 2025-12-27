@@ -39,6 +39,13 @@ jobs:
 
       - name: Build bundlr
         run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+        env:
+          # Ensure environment variables that affect the build are not set
+          # to maintain reproducibility. These optional env vars can embed
+          # values into the binary, so we explicitly unset them.
+          BUNDLR_PROJECT_NAME: ""
+          BUNDLR_PROJECT_VERSION: ""
+          BUNDLR_PYTHON_VERSION: ""
 
       - name: Rename artifact (Unix)
         if: runner.os != 'Windows'

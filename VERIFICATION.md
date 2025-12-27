@@ -103,9 +103,12 @@ If you build bundlr locally, you can compare checksums:
 ```bash
 git clone https://github.com/ai-mindset/bundlr.git
 cd bundlr
-git checkout VERSION  # Use the same version tag
+git checkout VERSION  # Use the same version tag as the release
 
 # Build with the same flags as CI
+# Ensure these environment variables are NOT set
+unset BUNDLR_PROJECT_NAME BUNDLR_PROJECT_VERSION BUNDLR_PYTHON_VERSION
+
 zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux
 
 # Generate checksum
@@ -116,10 +119,16 @@ shasum -a 256 zig-out/bin/bundlr
 
 **Important Note**: Zig builds are *mostly* reproducible, but some factors may cause differences:
 
-1. **Zig Version**: Must match exactly (check `.github/workflows/release.yml` for the version)
+1. **Zig Version**: Must match exactly (check `.github/workflows/release.yml` for the version - currently 0.15.2)
 2. **Build Flags**: Must use `-Doptimize=ReleaseFast` and correct `-Dtarget=`
-3. **Build Environment**: Minor differences in build environment may affect the binary
-4. **Build Timestamps**: May be embedded in the binary
+3. **Environment Variables**: The build uses optional environment variables that should NOT be set:
+   - `BUNDLR_PROJECT_NAME`
+   - `BUNDLR_PROJECT_VERSION`
+   - `BUNDLR_PYTHON_VERSION`
+   
+   These are intentionally not set in CI to ensure consistency.
+4. **Build Environment**: Minor differences in build environment may affect the binary
+5. **Build Timestamps**: May be embedded in the binary
 
 Even with these factors, the functional behavior and security of the binary should be identical. The SLSA attestation provides stronger guarantees than bit-by-bit reproducibility.
 
