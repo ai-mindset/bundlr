@@ -68,14 +68,11 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     var cmd_args: [32][]const u8 = undefined;
     var cmd_count: usize = 0;
 
-    // Use zig build run to execute bundlr
-    cmd_args[cmd_count] = "zig";
-    cmd_count += 1;
-    cmd_args[cmd_count] = "build";
-    cmd_count += 1;
-    cmd_args[cmd_count] = "run";
-    cmd_count += 1;
-    cmd_args[cmd_count] = "--";
+    // Get the current executable path
+    const exe_path = try std.fs.selfExePathAlloc(allocator);
+    defer allocator.free(exe_path);
+
+    cmd_args[cmd_count] = exe_path;
     cmd_count += 1;
     cmd_args[cmd_count] = package_result.text;
     cmd_count += 1;
