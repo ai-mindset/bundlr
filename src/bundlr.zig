@@ -19,6 +19,17 @@ pub const utils = struct {
     pub const extract = @import("utils/extract.zig");
     pub const cache = @import("utils/cache.zig");
 };
+pub const uv = struct {
+    pub const bootstrap = @import("uv/bootstrap.zig");
+    pub const venv = @import("uv/venv.zig");
+    pub const installer = @import("uv/installer.zig");
+};
+pub const git = struct {
+    pub const archive = @import("git/archive.zig");
+};
+pub const gui = struct {
+    pub const dialogues = @import("gui/simple_dialogues.zig");
+};
 
 /// Main bundlr functionality
 pub const Bundlr = struct {
