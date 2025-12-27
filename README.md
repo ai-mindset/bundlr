@@ -74,9 +74,13 @@ Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/V
 
 # Verify checksum (recommended)
 Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/VERSION/bundlr-windows-x86_64.exe.sha256" -OutFile "bundlr-windows-x86_64.exe.sha256"
-$expected = Get-Content bundlr-windows-x86_64.exe.sha256
+$expected = (Get-Content bundlr-windows-x86_64.exe.sha256).Trim()
 $actual = (Get-FileHash bundlr-windows-x86_64.exe -Algorithm SHA256).Hash.ToLower()
-if ($expected -eq $actual) { Write-Host "✓ Checksum verified!" -ForegroundColor Green } else { Write-Host "✗ Checksum mismatch!" -ForegroundColor Red }
+if ($expected -eq $actual) {
+    Write-Host "✓ Checksum verified!" -ForegroundColor Green
+} else {
+    Write-Host "✗ Checksum mismatch!" -ForegroundColor Red
+}
 
 # Run directly or rename
 bundlr-windows-x86_64.exe cowsay "Hello!"
