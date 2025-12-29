@@ -89,40 +89,16 @@ cd bundlr && zig build
 Bundlr creates completely isolated execution environments for each command:
 
 1. **🐍 Python Distribution** - Downloads Python 3.14 from python-build-standalone if not cached (~60MB, one-time)
-2. **🔒 Isolated Environment** - Creates a fresh virtual environment in platform-specific cache directory:
-   - Linux: `$XDG_CACHE_HOME/bundlr` or `~/.cache/bundlr`
-   - macOS: `~/Library/Caches/bundlr`
-   - Windows: `%LOCALAPPDATA%\bundlr`
+2. **🔒 Isolated Environment** - Creates fresh virtual environment in platform-specific cache
 3. **📦 Smart Installation** - Uses **pip** for PyPI packages, **uv** for Git repositories with automatic dependency resolution
 4. **▶️ Command Execution** - Runs your specified command with all arguments in the isolated environment
 5. **🧹 Automatic Cleanup** - Removes temporary files while preserving cache for faster subsequent runs
 
 **Technical Details:**
-- **Cache Strategy**: Downloads and virtual environments are cached (1GB limit) for performance
-- **Security**: Each execution is isolated - no access to system Python or global packages
-- **Performance**: Cold start ~10s (download), warm start ~2s (cached)
-- **Architecture**: Single binary written in Zig, no runtime dependencies
+- **Security-first**: Command injection prevention, isolated execution, no system pollution
+- **Performance**: Cold start ~10s (download), warm start ~2s (cached), 1GB cache limit
+- **Architecture**: Single Zig binary, no runtime dependencies, comprehensive testing
 
-## 🔧 Quality & Reliability
-
-Bundlr is built with production-grade standards for safety and maintainability:
-
-- **🛡️ Security-First**: Command injection prevention, input validation, and isolated execution environments
-- **🧪 Comprehensive Testing**: Full integration test suite covering cross-platform functionality and edge cases
-- **⚡ Memory Safety**: Explicit allocator management and proper resource cleanup following Zig best practices
-- **🌐 Cross-Platform**: Native support for Linux, macOS, and Windows with consistent behavior
-- **🔄 Robust Error Handling**: Graceful fallbacks, detailed error reporting, and automatic retry logic
-- **📋 Clean Architecture**: Modular design with clear separation of concerns for long-term maintainability
-
-**Built for reliability** - from individual developers to enterprise CI/CD pipelines.
-
-### Two Ways to Use
-
-| **GUI Mode** | **CLI Mode** |
-|--------------|--------------|
-| `bundlr` (no args) → Double-click behavior | `bundlr <package> [args]` → Command line |
-| Friendly dialogues for package/args | Direct command execution |
-| Live terminal output window | Output in current terminal |
 
 ## 🛠 Platform Support
 
@@ -148,7 +124,10 @@ A: Bundlr requires no installation - it's a single executable that automatically
 A: Yes. Each run uses a fresh, temporary virtual environment created from bundlr's own downloaded Python runtime, so your existing system Python and its global packages are never imported or modified. Bundlr only reads or writes files in its cache and in the locations you explicitly operate on.
 
 **Q: Where are files stored?**
-A: Platform-specific cache directories only. No global Python installation is modified.
+A: Platform-specific cache directories:
+- Linux: `~/.cache/bundlr`
+- macOS: `~/Library/Caches/bundlr`
+- Windows: `%LOCALAPPDATA%\bundlr`
 
 **Q: Can I use it for CI/CD?**
 A: Absolutely! Perfect for running tools like black, pytest, or custom scripts without setup steps.
