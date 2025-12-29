@@ -27,9 +27,6 @@ pub const uv = struct {
 pub const git = struct {
     pub const archive = @import("git/archive.zig");
 };
-pub const gui = struct {
-    pub const dialogues = @import("gui/simple_dialogues.zig");
-};
 
 /// Main bundlr functionality
 pub const Bundlr = struct {
