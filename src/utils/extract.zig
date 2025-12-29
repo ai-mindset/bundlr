@@ -70,10 +70,13 @@ pub fn extractArchive(allocator: std.mem.Allocator, target_dir: []const u8, file
             defer file.close();
             try file.writeAll(data);
 
+            // Ensure temp file is also cleaned up if an error occurs after this point
+            errdefer fs.deleteFileAbsolute(temp_file_path) catch {};
+
             // Extract using system tools
             try extractUsingSystemTools(allocator, target_dir, temp_file_path);
 
-            // Clean up temp file
+            // Clean up temp file on success
             fs.deleteFileAbsolute(temp_file_path) catch {};
         },
         .unsupported => {
