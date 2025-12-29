@@ -22,18 +22,20 @@ pub fn execute(
 ) !ProcessResult {
     var process = std.process.Child.init(args, allocator);
 
+    var env_map: ?std.process.EnvMap = null;
+    defer if (env_map) |*map| map.deinit();
+
     if (env_vars) |env| {
-        var env_map = std.process.EnvMap.init(allocator);
-        defer env_map.deinit();
+        env_map = std.process.EnvMap.init(allocator);
 
         var i: usize = 0;
         while (i < env.len) : (i += 2) {
             if (i + 1 < env.len) {
-                try env_map.put(env[i], env[i + 1]);
+                try env_map.?.put(env[i], env[i + 1]);
             }
         }
 
-        process.env_map = &env_map;
+        process.env_map = &env_map.?;
     }
 
     if (working_dir) |dir| {

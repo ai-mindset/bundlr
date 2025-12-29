@@ -126,18 +126,10 @@ fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app
         },
     }
 
-    // Continue with existing bundlr logic...
-    // (This would call the same functions as the current main function)
+    // Run the bootstrap process (same as CLI mode)
+    try bootstrapApplication(allocator, &config, app_args);
 
-    // For now, return success - in full implementation, this would contain
-    // all the existing bootstrap logic from main()
-    _ = app_args; // Suppress unused warning for now
-
-    // TODO: Move existing main() bootstrap logic here
-    print("⚠️  GUI mode package execution not yet fully implemented\n", .{});
-    print("   This will be connected to existing bundlr functionality\n", .{});
-
-    return true; // Temporary - return actual success status
+    return true; // Success
 }
 
 /// Main bundlr application entry point

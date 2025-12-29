@@ -321,7 +321,7 @@ pub const DistributionManager = struct {
 
     /// List available Python versions in the cache
     pub fn listCachedVersions(self: *Self) !std.ArrayList([]const u8) {
-        var versions = std.ArrayList([]const u8){ .allocator = self.allocator, .items = &.{}, .capacity = 0 };
+        var versions = std.ArrayList([]const u8).init(self.allocator);
         errdefer {
             for (versions.items) |version| {
                 self.allocator.free(version);

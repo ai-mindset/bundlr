@@ -14,6 +14,7 @@ pub const HttpError = error{
     AccessDenied,
     Timeout,
     TooManyRetries,
+    NoSpaceLeft,
 };
 
 /// HTTP client configuration
@@ -50,17 +51,17 @@ pub const Client = struct {
     ) HttpError!void {
         var retries: u32 = 0;
 
-        while (retries <= self.config.max_retries) {
+        while (retries < self.config.max_retries) {
             self.downloadFileAttempt(url, output_path, progress_fn) catch |err| {
                 retries += 1;
-                if (retries > self.config.max_retries) {
+                if (retries >= self.config.max_retries) {
                     print("Failed to download after {} retries: {}\n", .{ self.config.max_retries, err });
                     return HttpError.TooManyRetries;
                 }
 
                 // Wait before retry (exponential backoff)
                 const delay_ms = @as(u64, 1000) * (@as(u64, 1) << @intCast(retries - 1));
-                print("Download failed, retrying in {}ms... (attempt {}/{})\n", .{ delay_ms, retries + 1, self.config.max_retries + 1 });
+                print("Download failed, retrying in {}ms... (attempt {}/{})\n", .{ delay_ms, retries + 1, self.config.max_retries });
                 std.Thread.sleep(delay_ms * std.time.ns_per_ms);
                 continue;
             };
@@ -89,9 +90,15 @@ pub const Client = struct {
 
         // Use system curl command for reliable HTTP downloads
         // This is a pragmatic approach for the MVP
+
+        // Convert timeout from milliseconds to seconds
+        const timeout_seconds = (self.config.timeout_ms + 999) / 1000; // Round up
+        var timeout_buf: [16]u8 = undefined;
+        const timeout_str = try std.fmt.bufPrint(&timeout_buf, "{}", .{timeout_seconds});
+
         const result = std.process.Child.run(.{
             .allocator = self.allocator,
-            .argv = &.{ "curl", "-L", "-f", "-o", output_path, url },
+            .argv = &.{ "curl", "-L", "-f", "-m", timeout_str, "-o", output_path, url },
             .cwd = null,
             .env_map = null,
         }) catch |err| {
@@ -148,10 +155,14 @@ pub const Client = struct {
 
         std.log.info("HTTP GET {s}", .{url});
 
-        // Use curl to get response body
+        // Use curl to get response body with timeout
+        const timeout_seconds = (self.config.timeout_ms + 999) / 1000; // Round up
+        var timeout_buf: [16]u8 = undefined;
+        const timeout_str = try std.fmt.bufPrint(&timeout_buf, "{}", .{timeout_seconds});
+
         const result = std.process.Child.run(.{
             .allocator = self.allocator,
-            .argv = &.{ "curl", "-L", "-f", "-s", url },
+            .argv = &.{ "curl", "-L", "-f", "-s", "-m", timeout_str, url },
             .cwd = null,
             .env_map = null,
         }) catch |err| {
