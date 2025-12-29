@@ -79,6 +79,16 @@ pub const Cache = struct {
 
                 // Successfully acquired lock, store file handle
                 self.lock_file = file;
+
+                // Write PID to lock file for debugging
+                const pid = std.os.getpid();
+                var pid_buf: [32]u8 = undefined;
+                const pid_str = try std.fmt.bufPrint(&pid_buf, "{d}\n", .{pid});
+                try self.lock_file.?.writeAll(pid_str);
+                try self.lock_file.?.sync();
+
+                // Lock already acquired, return early to avoid redundant lock call
+                return;
             },
             else => return err,
         };
@@ -233,8 +243,6 @@ pub const Cache = struct {
 
         // Remove oldest entries until under size limit
         for (entries.items) |entry| {
-            defer self.allocator.free(entry.name);
-
             const current_stats = try self.getStats();
             if (current_stats.total_size <= max_size_bytes) {
                 break;
@@ -247,6 +255,11 @@ pub const Cache = struct {
             fs.deleteTreeAbsolute(entry_path) catch |err| {
                 std.log.warn("Failed to remove {s}: {}", .{ entry_path, err });
             };
+        }
+
+        // Clean up all allocated entry names regardless of early break
+        for (entries.items) |entry| {
+            self.allocator.free(entry.name);
         }
     }
 

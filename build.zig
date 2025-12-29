@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) void {
     // Build-time configuration options
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", "0.1.0");
-    build_options.addOption([]const u8, "default_python_version", "3.13");
+    build_options.addOption([]const u8, "default_python_version", "3.14");
 
     // Allow build-time project configuration via environment variables
     if (std.process.getEnvVarOwned(b.allocator, "BUNDLR_PROJECT_NAME")) |project_name| {

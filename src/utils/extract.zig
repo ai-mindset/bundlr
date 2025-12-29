@@ -70,10 +70,13 @@ pub fn extractArchive(allocator: std.mem.Allocator, target_dir: []const u8, file
             defer file.close();
             try file.writeAll(data);
 
+            // Ensure temp file is also cleaned up if an error occurs after this point
+            errdefer fs.deleteFileAbsolute(temp_file_path) catch {};
+
             // Extract using system tools
             try extractUsingSystemTools(allocator, target_dir, temp_file_path);
 
-            // Clean up temp file
+            // Clean up temp file on success
             fs.deleteFileAbsolute(temp_file_path) catch {};
         },
         .unsupported => {
@@ -130,16 +133,20 @@ fn extractZipWithSystemUnzip(allocator: std.mem.Allocator, target_dir: []const u
     // Use different commands based on platform
     switch (builtin.os.tag) {
         .windows => {
-            // Windows PowerShell command - use parameter array to prevent injection
+            // Windows PowerShell command - build single command string for -Command
+            const command = try std.fmt.allocPrint(
+                allocator,
+                "& {{Expand-Archive -LiteralPath '{s}' -DestinationPath '{s}' -Force}}",
+                .{ archive_path, target_dir },
+            );
+            defer allocator.free(command);
+
             const args = [_][]const u8{
                 "powershell",
                 "-NoProfile",
                 "-ExecutionPolicy", "Bypass",
                 "-Command",
-                "Expand-Archive",
-                "-Path", archive_path,
-                "-DestinationPath", target_dir,
-                "-Force"
+                command,
             };
 
             var process = std.process.Child.init(&args, allocator);
