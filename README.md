@@ -132,7 +132,7 @@ Bundlr creates completely isolated execution environments for each command:
 A: Bundlr requires no installation - it's a single executable that automatically downloads Python and manages everything. pipx requires Python to already be installed.
 
 **Q: Is it safe to run unknown packages?**
-A: Yes, each run is completely isolated in a temporary virtual environment with no access to your system Python or files.
+A: Yes. Each run uses a fresh, temporary virtual environment created from bundlr's own downloaded Python runtime, so your existing system Python and its global packages are never imported or modified. Bundlr only reads or writes files in its cache and in the locations you explicitly operate on.
 
 **Q: Where are files stored?**
 A: Platform-specific cache directories only. No global Python installation is modified.
