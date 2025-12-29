@@ -232,9 +232,8 @@ pub const Cache = struct {
         std.mem.sort(DirEntry, entries.items, {}, DirEntry.lessThan);
 
         // Remove oldest entries until under size limit
+        var freed_count: usize = 0;
         for (entries.items) |entry| {
-            defer self.allocator.free(entry.name);
-
             const current_stats = try self.getStats();
             if (current_stats.total_size <= max_size_bytes) {
                 break;
@@ -247,6 +246,14 @@ pub const Cache = struct {
             fs.deleteTreeAbsolute(entry_path) catch |err| {
                 std.log.warn("Failed to remove {s}: {}", .{ entry_path, err });
             };
+            
+            self.allocator.free(entry.name);
+            freed_count += 1;
+        }
+        
+        // Free remaining entry names that weren't processed
+        for (entries.items[freed_count..]) |entry| {
+            self.allocator.free(entry.name);
         }
     }
 
