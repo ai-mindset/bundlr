@@ -39,9 +39,6 @@ jobs:
 
       - name: Build bundlr
         run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
-        # Note: We intentionally do not set BUNDLR_PROJECT_NAME, BUNDLR_PROJECT_VERSION,
-        # or BUNDLR_PYTHON_VERSION environment variables to maintain reproducibility.
-        # These optional env vars can embed values into the binary.
 
       - name: Rename artifact (Unix)
         if: runner.os != 'Windows'

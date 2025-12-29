@@ -204,45 +204,208 @@ pub fn showConsoleOutput(allocator: std.mem.Allocator, title: []const u8, comman
 }
 
 /// Windows console implementation using cmd
-fn showWindowsConsole(allocator: std.mem.Allocator, title: []const u8, command: []const []const u8) !void {
-    // Build command string manually
-    var total_len: usize = 0;
-    for (command, 0..) |arg, i| {
-        if (i > 0) total_len += 1; // space
-        total_len += arg.len;
-        if (std.mem.indexOf(u8, arg, " ")) |_| total_len += 2; // quotes
-    }
-    total_len += 50; // pause command
+/// Escapes a Windows command-line argument according to CMD rules
+/// Caller must free the returned string
+fn escapeWindowsArgument(allocator: std.mem.Allocator, arg: []const u8) ![]u8 {
+    // Quick check if escaping is needed
+    var needs_quotes = false;
+    var has_quotes = false;
+    var backslash_count: usize = 0;
 
+    // Check if argument contains spaces, tabs, or quotes
+    for (arg) |char| {
+        switch (char) {
+            ' ', '\t' => needs_quotes = true,
+            '"' => {
+                needs_quotes = true;
+                has_quotes = true;
+            },
+            '\\' => backslash_count += 1,
+            else => backslash_count = 0,
+        }
+    }
+
+    // If no special characters, return copy of original
+    if (!needs_quotes and !has_quotes) {
+        return try allocator.dupe(u8, arg);
+    }
+
+    // Calculate required length for escaped string
+    var escaped_len: usize = arg.len;
+    if (needs_quotes) escaped_len += 2; // opening and closing quotes
+
+    // Count additional escaping needed
+    var i: usize = 0;
+    while (i < arg.len) {
+        const char = arg[i];
+        if (char == '"') {
+            escaped_len += 1; // for backslash before quote
+        } else if (char == '\\') {
+            // Count consecutive backslashes
+            var slash_count: usize = 0;
+            var j = i;
+            while (j < arg.len and arg[j] == '\\') {
+                slash_count += 1;
+                j += 1;
+            }
+            // If backslashes are followed by quote or end of string (with quotes), double them
+            if (j < arg.len and arg[j] == '"') {
+                escaped_len += slash_count; // double the backslashes
+            } else if (j == arg.len and needs_quotes) {
+                escaped_len += slash_count; // double backslashes before closing quote
+            }
+            i = j - 1; // will be incremented by loop
+        }
+        i += 1;
+    }
+
+    // Build escaped string
+    const escaped = try allocator.alloc(u8, escaped_len);
+    var pos: usize = 0;
+
+    if (needs_quotes) {
+        escaped[pos] = '"';
+        pos += 1;
+    }
+
+    i = 0;
+    while (i < arg.len) {
+        const char = arg[i];
+        if (char == '"') {
+            // Escape quote
+            escaped[pos] = '\\';
+            pos += 1;
+            escaped[pos] = '"';
+            pos += 1;
+        } else if (char == '\\') {
+            // Handle backslashes
+            var slash_count: usize = 0;
+            var j = i;
+            while (j < arg.len and arg[j] == '\\') {
+                slash_count += 1;
+                j += 1;
+            }
+
+            // Check if we need to double backslashes
+            var double_slashes = false;
+            if (j < arg.len and arg[j] == '"') {
+                double_slashes = true; // before quote
+            } else if (j == arg.len and needs_quotes) {
+                double_slashes = true; // before closing quote
+            }
+
+            // Write backslashes (doubled if needed)
+            const total_slashes = if (double_slashes) slash_count * 2 else slash_count;
+            for (0..total_slashes) |_| {
+                escaped[pos] = '\\';
+                pos += 1;
+            }
+
+            i = j - 1; // will be incremented by loop
+        } else {
+            escaped[pos] = char;
+            pos += 1;
+        }
+        i += 1;
+    }
+
+    if (needs_quotes) {
+        escaped[pos] = '"';
+        pos += 1;
+    }
+
+    return escaped;
+}
+
+/// Escapes a command string for nested cmd /k execution
+/// Caller must free the returned string
+fn escapeForNestedCmd(allocator: std.mem.Allocator, command: []const u8) ![]u8 {
+    // For cmd /k, we need to escape quotes within the command string
+    // and wrap the entire command in quotes
+
+    var quote_count: usize = 0;
+    for (command) |char| {
+        if (char == '"') quote_count += 1;
+    }
+
+    // Allocate space: original + quotes to escape + wrapping quotes
+    const escaped_len = command.len + quote_count + 2;
+    const escaped = try allocator.alloc(u8, escaped_len);
+    var pos: usize = 0;
+
+    // Opening quote
+    escaped[pos] = '"';
+    pos += 1;
+
+    // Escape internal quotes
+    for (command) |char| {
+        if (char == '"') {
+            escaped[pos] = '\\';
+            pos += 1;
+            escaped[pos] = '"';
+            pos += 1;
+        } else {
+            escaped[pos] = char;
+            pos += 1;
+        }
+    }
+
+    // Closing quote
+    escaped[pos] = '"';
+    pos += 1;
+
+    return escaped;
+}
+
+fn showWindowsConsole(allocator: std.mem.Allocator, title: []const u8, command: []const []const u8) !void {
+    // Build command string using proper Windows argument escaping
+    var cmd_parts = std.ArrayList([]u8).init(allocator);
+    defer {
+        for (cmd_parts.items) |part| {
+            allocator.free(part);
+        }
+        cmd_parts.deinit();
+    }
+
+    // Escape each argument properly
+    for (command) |arg| {
+        const escaped_arg = try escapeWindowsArgument(allocator, arg);
+        try cmd_parts.append(escaped_arg);
+    }
+
+    // Calculate total length for command string
+    var total_len: usize = 0;
+    for (cmd_parts.items, 0..) |part, i| {
+        if (i > 0) total_len += 1; // space
+        total_len += part.len;
+    }
+
+    // Add space for pause command
+    const pause_cmd = " && echo. && echo Press any key to close... && pause";
+    total_len += pause_cmd.len;
+
+    // Build final command string
     const cmd_str = try allocator.alloc(u8, total_len);
     defer allocator.free(cmd_str);
 
     var pos: usize = 0;
-    for (command, 0..) |arg, i| {
+    for (cmd_parts.items, 0..) |part, i| {
         if (i > 0) {
             cmd_str[pos] = ' ';
             pos += 1;
         }
-        // Quote arguments that contain spaces
-        if (std.mem.indexOf(u8, arg, " ")) |_| {
-            cmd_str[pos] = '"';
-            pos += 1;
-            @memcpy(cmd_str[pos..pos + arg.len], arg);
-            pos += arg.len;
-            cmd_str[pos] = '"';
-            pos += 1;
-        } else {
-            @memcpy(cmd_str[pos..pos + arg.len], arg);
-            pos += arg.len;
-        }
+        @memcpy(cmd_str[pos..pos + part.len], part);
+        pos += part.len;
     }
 
     // Add pause to keep window open
-    const pause_cmd = " && echo. && echo Press any key to close... && pause";
     @memcpy(cmd_str[pos..pos + pause_cmd.len], pause_cmd);
     pos += pause_cmd.len;
 
-    const full_cmd = try std.fmt.allocPrint(allocator, "start \"{s}\" cmd /k \"{s}\"", .{ title, cmd_str[0..pos] });
+    // Escape the entire command string for nested cmd /k usage
+    const escaped_cmd = try escapeForNestedCmd(allocator, cmd_str[0..pos]);
+    defer allocator.free(escaped_cmd);
+    const full_cmd = try std.fmt.allocPrint(allocator, "start \"{s}\" cmd /k {s}", .{ title, escaped_cmd });
     defer allocator.free(full_cmd);
 
     // Spawn terminal asynchronously
@@ -509,4 +672,59 @@ test "dialogue result cleanup" {
     defer result.deinit();
 
     try std.testing.expectEqualStrings("test", result.text);
+}
+
+test "Windows argument escaping - no special characters" {
+    const allocator = std.testing.allocator;
+
+    const result = try escapeWindowsArgument(allocator, "simple");
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings("simple", result);
+}
+
+test "Windows argument escaping - spaces" {
+    const allocator = std.testing.allocator;
+
+    const result = try escapeWindowsArgument(allocator, "path with spaces");
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings("\"path with spaces\"", result);
+}
+
+test "Windows argument escaping - quotes" {
+    const allocator = std.testing.allocator;
+
+    const result = try escapeWindowsArgument(allocator, "path\"with\"quotes");
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings("\"path\\\"with\\\"quotes\"", result);
+}
+
+test "Windows argument escaping - complex path" {
+    const allocator = std.testing.allocator;
+
+    const result = try escapeWindowsArgument(allocator, "C:\\Program Files\\App \"Version\"\\bundlr.exe");
+    defer allocator.free(result);
+
+    // Backslashes that are not before quotes don't need to be doubled for cmd.exe
+    try std.testing.expectEqualStrings("\"C:\\Program Files\\App \\\"Version\\\"\\bundlr.exe\"", result);
+}
+
+test "escapeForNestedCmd basic functionality" {
+    const allocator = std.testing.allocator;
+
+    const result = try escapeForNestedCmd(allocator, "simple command");
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings("\"simple command\"", result);
+}
+
+test "escapeForNestedCmd with quotes" {
+    const allocator = std.testing.allocator;
+
+    const result = try escapeForNestedCmd(allocator, "command \"with quotes\"");
+    defer allocator.free(result);
+
+    try std.testing.expectEqualStrings("\"command \\\"with quotes\\\"\"", result);
 }

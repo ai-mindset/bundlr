@@ -2,6 +2,136 @@ const std = @import("std");
 const bundlr = @import("bundlr");
 const print = std.debug.print;
 
+/// GUI mode - show dialogues for package input and run bundlr
+fn runGuiMode(allocator: std.mem.Allocator) !void {
+    print("🎨 Bundlr GUI Mode\n", .{});
+    print("   Launching dialogue interface...\n\n", .{});
+
+    // Get package name or repository
+    var package_result = bundlr.gui.dialogues.showInputDialogue(
+        allocator,
+        "Bundlr - Package Runner",
+        "Enter PyPI package or Git URL:",
+        "cowsay"
+    ) catch |err| {
+        if (err == error.DialogueCancelled) {
+            print("📛 Operation cancelled by user\n", .{});
+            return;
+        }
+        bundlr.gui.dialogues.showMessageDialogue("Error", "Failed to show package dialogue");
+        return err;
+    };
+    defer package_result.deinit();
+
+    if (package_result.text.len == 0) {
+        bundlr.gui.dialogues.showMessageDialogue("Error", "Package name cannot be empty");
+        return;
+    }
+
+    // Get arguments
+    var args_result = bundlr.gui.dialogues.showInputDialogue(
+        allocator,
+        "Bundlr - Arguments",
+        "Enter arguments (optional):",
+        "-t \"Hello from GUI!\""
+    ) catch |err| {
+        if (err == error.DialogueCancelled) {
+            print("📛 Operation cancelled by user\n", .{});
+            return;
+        }
+        bundlr.gui.dialogues.showMessageDialogue("Error", "Failed to show arguments dialogue");
+        return err;
+    };
+    defer args_result.deinit();
+
+    print("📦 Package: {s}\n", .{package_result.text});
+    if (args_result.text.len > 0) {
+        print("⚙️  Arguments: {s}\n", .{args_result.text});
+    }
+    print("\n🚀 Running bundlr...\n\n", .{});
+
+    // Parse arguments into fixed array
+    var args_array: [16][]const u8 = undefined; // Support up to 16 arguments
+    var arg_count: usize = 0;
+
+    if (args_result.text.len > 0) {
+        // Simple approach: just treat the entire args_result.text as one argument
+        // This is sufficient for basic GUI use cases
+        const trimmed = std.mem.trim(u8, args_result.text, " \t\"'");
+        if (trimmed.len > 0) {
+            args_array[arg_count] = trimmed;
+            arg_count += 1;
+        }
+    }
+
+    // Build command to execute in terminal window
+    var cmd_args: [32][]const u8 = undefined;
+    var cmd_count: usize = 0;
+
+    // Get the current executable path
+    const exe_path = try std.fs.selfExePathAlloc(allocator);
+    defer allocator.free(exe_path);
+
+    cmd_args[cmd_count] = exe_path;
+    cmd_count += 1;
+    cmd_args[cmd_count] = package_result.text;
+    cmd_count += 1;
+
+    // Add parsed arguments
+    var i: usize = 0;
+    while (i < arg_count and cmd_count < cmd_args.len) {
+        cmd_args[cmd_count] = args_array[i];
+        cmd_count += 1;
+        i += 1;
+    }
+
+    // Show terminal window with bundlr execution
+    const title = try std.fmt.allocPrint(allocator, "Bundlr - {s}", .{package_result.text});
+    defer allocator.free(title);
+
+    bundlr.gui.dialogues.showConsoleOutput(allocator, title, cmd_args[0..cmd_count]) catch |err| {
+        const error_msg = "Failed to open terminal window. Check that your system has a terminal emulator installed.";
+        bundlr.gui.dialogues.showMessageDialogue("Bundlr Error", error_msg);
+        print("❌ Error opening console: {}\n", .{err});
+        return;
+    };
+
+    print("✅ Launched bundlr in terminal window\n", .{});
+}
+
+/// Internal function to run a package (extracted from main logic)
+fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app_args: []const []const u8) !bool {
+    // Auto-detect mode and create configuration
+    const build_config = bundlr.config.BuildConfig{};
+    var config = if (isGitRepository(package_arg))
+        try bundlr.config.createGit(allocator, package_arg, build_config.default_python_version, null)
+    else
+        try bundlr.config.create(allocator, package_arg, "1.0.0", build_config.default_python_version);
+    defer config.deinit();
+
+    // Print bootstrap message based on source mode
+    switch (config.source_mode) {
+        .pypi => {
+            print("🚀 Bundlr: Bootstrapping {s} v{s} (Python {s})\n", .{
+                config.project_name,
+                config.project_version,
+                config.python_version,
+            });
+        },
+        .git => {
+            print("🚀 Bundlr: Bootstrapping from {s} (Python {s})\n", .{
+                config.git_repository.?,
+                config.python_version,
+            });
+        },
+    }
+
+    // Run the bootstrap process (same as CLI mode)
+    try bootstrapApplication(allocator, &config, app_args);
+
+    return true; // Success
+}
+
 /// Main bundlr application entry point
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -12,9 +142,20 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    // Show help if no arguments or help requested
-    if (args.len == 1 or (args.len > 1 and (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "-h")))) {
-        printUsage(args[0]);
+    // Check for special flags first
+    if (args.len > 1) {
+        if (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "-h")) {
+            printUsage(args[0]);
+            return;
+        } else if (std.mem.eql(u8, args[1], "--gui")) {
+            try runGuiMode(allocator);
+            return;
+        }
+    }
+
+    // Default behavior: launch GUI if no arguments (double-click behavior)
+    if (args.len == 1) {
+        try runGuiMode(allocator);
         return;
     }
 
@@ -342,35 +483,30 @@ fn executeWithPython(
 
 /// Print usage information
 fn printUsage(program_name: []const u8) void {
-    print("Bundlr - Python Application Packager\n", .{});
-    print("Run ANY Python package from PyPI or Git with zero setup!\n", .{});
-    print("\n🚀 SIMPLE USAGE:\n", .{});
-    print("  {s} <package_or_repo> [arguments...]\n", .{program_name});
+    print("bundlr - Execute Python packages from PyPI or Git repositories\n", .{});
 
-    print("\n📦 PyPI PACKAGES:\n", .{});
-    print("  {s} cowsay \"Hello World\"              # Run cowsay with arguments\n", .{program_name});
-    print("  {s} httpie GET httpbin.org/json        # Run httpie (HTTP client)\n", .{program_name});
-    print("  {s} youtube-dl --help                  # Run youtube-dl help\n", .{program_name});
-    print("  {s} black --check .                    # Run black code formatter\n", .{program_name});
+    print("\nUSAGE:\n", .{});
+    print("  {s}                                   # GUI mode (default)\n", .{program_name});
+    print("  {s} <package> [args...]               # Run PyPI package\n", .{program_name});
+    print("  {s} <repository> [args...]            # Run from Git repository\n", .{program_name});
 
-    print("\n🔗 GIT REPOSITORIES:\n", .{});
-    print("  {s} https://github.com/psf/black       # Run from Git repo\n", .{program_name});
-    print("  {s} github.com/user/repo --help        # GitHub short syntax\n", .{program_name});
+    print("\nEXAMPLES:\n", .{});
+    print("  {s} cowsay \"Hello World\"              # PyPI package with arguments\n", .{program_name});
+    print("  {s} httpie GET httpbin.org/json        # HTTP client tool\n", .{program_name});
+    print("  {s} youtube-dl --help                  # Show package help\n", .{program_name});
+    print("  {s} https://github.com/psf/black       # Git repository\n", .{program_name});
 
-    print("\n🎯 OPTIONS:\n", .{});
+    print("\nOPTIONS:\n", .{});
     print("  -h, --help              Show this help message\n", .{});
+    print("      --gui               Launch GUI mode explicitly\n", .{});
 
-    print("\n🔧 ENVIRONMENT VARIABLES (optional):\n", .{});
+    print("\nENVIRONMENT:\n", .{});
     print("  BUNDLR_PYTHON_VERSION   Python version (default: 3.14)\n", .{});
     print("  BUNDLR_GIT_BRANCH       Git branch name (default: main)\n", .{});
     print("  BUNDLR_CACHE_DIR        Custom cache directory\n", .{});
 
-    print("\n✨ It's that simple! Bundlr automatically:\n", .{});
-    print("   • Downloads and installs Python if needed\n", .{});
-    print("   • Creates isolated virtual environments\n", .{});
-    print("   • Installs packages and dependencies\n", .{});
-    print("   • Runs your application\n", .{});
-    print("   • Cleans up temporary files\n", .{});
+    print("\nBundlr automatically manages Python distributions, virtual environments,\n", .{});
+    print("and package installations for seamless execution.\n", .{});
 }
 
 test "bundlr config integration" {

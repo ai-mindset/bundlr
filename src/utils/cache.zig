@@ -6,6 +6,16 @@ const fs = std.fs;
 const paths_module = @import("../platform/paths.zig");
 const config = @import("../config.zig");
 
+/// Directory entry for cache cleanup sorting
+const DirEntry = struct {
+    name: []const u8,
+    mtime: i128,
+
+    fn lessThan(_: void, a: DirEntry, b: DirEntry) bool {
+        return a.mtime < b.mtime; // Sort oldest first
+    }
+};
+
 /// Cache manager with locking and validation capabilities
 pub const Cache = struct {
     allocator: std.mem.Allocator,
@@ -67,7 +77,8 @@ pub const Cache = struct {
                     },
                 };
 
-                return file;
+                // Successfully acquired lock, store file handle
+                self.lock_file = file;
             },
             else => return err,
         };
@@ -171,9 +182,72 @@ pub const Cache = struct {
             build_config.max_cache_size_mb,
         });
 
-        // For now, just log that cleanup would happen
-        // TODO: Implement LRU-based cleanup
-        std.log.warn("Cache cleanup not yet implemented - consider manually clearing cache", .{});
+        // Simple cleanup strategy: remove oldest venvs and git extracts first
+        try self.cleanupBySize(max_size_bytes);
+    }
+
+    /// Clean up cache entries to fit within size limit
+    fn cleanupBySize(self: *Cache, max_size_bytes: u64) !void {
+        // Cleanup priority: git_extracts > venvs > git_archives > downloads > python > uv
+        const cleanup_dirs = [_][]const u8{ "git_extracts", "venvs", "git_archives" };
+
+        for (cleanup_dirs) |subdir_name| {
+            const current_stats = try self.getStats();
+            if (current_stats.total_size <= max_size_bytes) {
+                std.log.info("Cache cleanup completed. Size: {d} MB", .{current_stats.total_size / (1024 * 1024)});
+                return;
+            }
+
+            const subdir_path = try std.fs.path.join(self.allocator, &.{ self.cache_dir, subdir_name });
+            defer self.allocator.free(subdir_path);
+
+            try self.cleanupDirectory(subdir_path, max_size_bytes);
+        }
+    }
+
+    /// Clean up a specific directory by removing oldest entries
+    fn cleanupDirectory(self: *Cache, dir_path: []const u8, max_size_bytes: u64) !void {
+        const dir = fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound => return, // Directory doesn't exist
+            else => return err,
+        };
+        defer dir.close();
+
+        // Collect directory entries with their timestamps
+        var entries = std.ArrayList(DirEntry).init(self.allocator);
+        defer entries.deinit();
+
+        var iterator = dir.iterate();
+        while (try iterator.next()) |entry| {
+            if (entry.kind == .directory) {
+                const stat = try dir.statFile(entry.name);
+                try entries.append(DirEntry{
+                    .name = try self.allocator.dupe(u8, entry.name),
+                    .mtime = stat.mtime,
+                });
+            }
+        }
+
+        // Sort by modification time (oldest first)
+        std.mem.sort(DirEntry, entries.items, {}, DirEntry.lessThan);
+
+        // Remove oldest entries until under size limit
+        for (entries.items) |entry| {
+            defer self.allocator.free(entry.name);
+
+            const current_stats = try self.getStats();
+            if (current_stats.total_size <= max_size_bytes) {
+                break;
+            }
+
+            const entry_path = try std.fs.path.join(self.allocator, &.{ dir_path, entry.name });
+            defer self.allocator.free(entry_path);
+
+            std.log.info("Removing old cache entry: {s}", .{entry.name});
+            fs.deleteTreeAbsolute(entry_path) catch |err| {
+                std.log.warn("Failed to remove {s}: {}", .{ entry_path, err });
+            };
+        }
     }
 
     /// Clear all cache contents

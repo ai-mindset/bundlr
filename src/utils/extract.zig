@@ -48,6 +48,7 @@ pub fn extractFile(allocator: std.mem.Allocator, target_dir: []const u8, filenam
 }
 
 /// Extract an archive (auto-detects format from filename)
+/// For archives, writes data to a temporary file and uses system tools
 pub fn extractArchive(allocator: std.mem.Allocator, target_dir: []const u8, filename: []const u8, data: []const u8) !void {
     const archive_type = ArchiveType.fromFilename(filename);
 
@@ -55,45 +56,30 @@ pub fn extractArchive(allocator: std.mem.Allocator, target_dir: []const u8, file
         .single_file => {
             return extractFile(allocator, target_dir, filename, data);
         },
-        .tar_gz => {
-            return extractTarGz(allocator, target_dir, data);
-        },
-        .zip => {
-            return extractZip(allocator, target_dir, data);
+        .tar_gz, .zip => {
+            // Write data to temporary file and use system tools
+            var paths = paths_module.Paths.init(allocator);
+            const temp_dir = try paths.getTemporaryDir();
+            defer allocator.free(temp_dir);
+
+            const temp_file_path = try fs.path.join(allocator, &.{ temp_dir, filename });
+            defer allocator.free(temp_file_path);
+
+            // Write data to temp file
+            const file = try fs.createFileAbsolute(temp_file_path, .{});
+            defer file.close();
+            try file.writeAll(data);
+
+            // Extract using system tools
+            try extractUsingSystemTools(allocator, target_dir, temp_file_path);
+
+            // Clean up temp file
+            fs.deleteFileAbsolute(temp_file_path) catch {};
         },
         .unsupported => {
             return error.UnsupportedArchiveFormat;
         },
     }
-}
-
-/// Extract a tar.gz archive
-/// Note: This is a placeholder implementation - full tar.gz support requires
-/// implementing gzip decompression and tar parsing
-fn extractTarGz(allocator: std.mem.Allocator, target_dir: []const u8, data: []const u8) !void {
-    _ = allocator;
-    _ = target_dir;
-    _ = data;
-    // TODO: Implement tar.gz extraction
-    // For now, this would require either:
-    // 1. Using system tar command via subprocess
-    // 2. Implementing gzip + tar parsing in Zig
-    // 3. Using external tar library
-    std.log.warn("tar.gz extraction not yet implemented", .{});
-    return error.NotImplemented;
-}
-
-/// Extract a ZIP archive
-/// Note: This is a placeholder implementation - full ZIP support requires
-/// implementing ZIP format parsing and decompression
-fn extractZip(allocator: std.mem.Allocator, target_dir: []const u8, data: []const u8) !void {
-    _ = allocator;
-    _ = target_dir;
-    _ = data;
-    // TODO: Implement ZIP extraction
-    // This would require implementing ZIP format parsing
-    std.log.warn("ZIP extraction not yet implemented", .{});
-    return error.NotImplemented;
 }
 
 /// Extract using system commands (fallback for complex archives)
@@ -144,10 +130,17 @@ fn extractZipWithSystemUnzip(allocator: std.mem.Allocator, target_dir: []const u
     // Use different commands based on platform
     switch (builtin.os.tag) {
         .windows => {
-            // Windows PowerShell command
-            const cmd = try std.fmt.allocPrint(allocator, "Expand-Archive -Path '{s}' -DestinationPath '{s}'", .{ archive_path, target_dir });
-            defer allocator.free(cmd);
-            const args = [_][]const u8{ "powershell", "-Command", cmd };
+            // Windows PowerShell command - use parameter array to prevent injection
+            const args = [_][]const u8{
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy", "Bypass",
+                "-Command",
+                "Expand-Archive",
+                "-Path", archive_path,
+                "-DestinationPath", target_dir,
+                "-Force"
+            };
 
             var process = std.process.Child.init(&args, allocator);
             const result = try process.spawnAndWait();
