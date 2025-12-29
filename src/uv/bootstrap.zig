@@ -11,13 +11,15 @@ const extract = @import("../utils/extract.zig");
 pub const FALLBACK_UV_VERSION = "0.9.18";
 
 /// Get the latest uv version from GitHub API
-pub fn getLatestUvVersion(allocator: std.mem.Allocator) ![]u8 {
+pub fn getLatestUvVersion(allocator: std.mem.Allocator, paths: *paths_module.Paths) ![]u8 {
     var http_client = http.Client.init(allocator, http.Config{});
 
     // Use a temporary file for the API response
-    const cache_dir = std.fs.getAppDataDir(allocator, "bundlr_cache") catch try allocator.dupe(u8, "/tmp");
+    const cache_dir = try paths.getBundlrCacheDir();
     defer allocator.free(cache_dir);
 
+    // Ensure cache directory exists
+    try paths.ensureDirExists(cache_dir);
     const temp_file = try std.fs.path.join(allocator, &[_][]const u8{ cache_dir, "uv_version.json" });
     defer allocator.free(temp_file);
 
@@ -176,7 +178,6 @@ pub const UvManager = struct {
         };
     }
 
-
     /// Check if uv is already installed and cached
     pub fn isCached(self: *UvManager, version: []const u8) !bool {
         const uv_exe = try self.getUvExecutable(version);
@@ -190,7 +191,7 @@ pub const UvManager = struct {
     /// Ensure uv is installed, downloading if necessary
     pub fn ensureUvInstalled(self: *UvManager, progress_fn: ?http.ProgressFn) ![]u8 {
         // Get the latest version
-        const latest_version = try getLatestUvVersion(self.allocator);
+        const latest_version = try getLatestUvVersion(self.allocator, &self.paths);
         errdefer self.allocator.free(latest_version);
 
         if (try self.isCached(latest_version)) {
@@ -225,11 +226,8 @@ pub const UvManager = struct {
         const downloads_dir = try std.fs.path.join(self.allocator, &[_][]const u8{ cache_dir, "downloads" });
         defer self.allocator.free(downloads_dir);
 
-        // Ensure downloads directory exists
-        std.fs.makeDirAbsolute(downloads_dir) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+        // Ensure downloads directory exists (create parent directories if needed)
+        try self.paths.ensureDirExists(downloads_dir);
 
         const archive_path = try std.fs.path.join(self.allocator, &[_][]const u8{ downloads_dir, archive_filename });
         defer self.allocator.free(archive_path);
@@ -252,18 +250,14 @@ pub const UvManager = struct {
         const version_dir = try std.fs.path.join(self.allocator, &[_][]const u8{ uv_dir, version });
         defer self.allocator.free(version_dir);
 
-        // Ensure version directory exists
-        std.fs.makeDirAbsolute(version_dir) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+        // Ensure version directory exists (create parent directories if needed)
+        try self.paths.ensureDirExists(version_dir);
 
         // Extract archive - use the generic extractUsingSystemTools function
         try extract.extractUsingSystemTools(self.allocator, version_dir, archive_path);
 
         // Make uv executable (Unix-like systems)
-        const platform = Platform.current();
-        if (platform == .linux or platform == .macos) {
+        if (comptime builtin.os.tag != .windows) {
             const uv_exe = try self.getUvExecutable(version);
             defer self.allocator.free(uv_exe);
 
@@ -384,3 +378,4 @@ test "uv manager creation" {
     // Test basic functionality
     try std.testing.expect(manager.allocator.vtable == allocator.vtable);
 }
+

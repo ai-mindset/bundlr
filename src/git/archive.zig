@@ -164,11 +164,8 @@ pub const GitArchiveManager = struct {
         const git_archives_dir = try std.fs.path.join(self.allocator, &[_][]const u8{ cache_dir, "git_archives" });
         defer self.allocator.free(git_archives_dir);
 
-        // Ensure git archives directory exists
-        std.fs.makeDirAbsolute(git_archives_dir) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+        // Ensure git archives directory exists (create parent directories if needed)
+        try self.paths.ensureDirExists(git_archives_dir);
 
         const archive_path = try std.fs.path.join(self.allocator, &[_][]const u8{ git_archives_dir, cache_filename });
         errdefer self.allocator.free(archive_path);
@@ -191,11 +188,8 @@ pub const GitArchiveManager = struct {
         const extracts_dir = try std.fs.path.join(self.allocator, &[_][]const u8{ cache_dir, "git_extracts" });
         defer self.allocator.free(extracts_dir);
 
-        // Ensure extracts directory exists
-        std.fs.makeDirAbsolute(extracts_dir) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+        // Ensure extracts directory exists (create parent directories if needed)
+        try self.paths.ensureDirExists(extracts_dir);
 
         // Generate unique extract directory name with timestamp
         const timestamp = std.time.timestamp();
@@ -205,11 +199,8 @@ pub const GitArchiveManager = struct {
         const extract_dir = try std.fs.path.join(self.allocator, &[_][]const u8{ extracts_dir, extract_dir_name });
         defer self.allocator.free(extract_dir);
 
-        // Ensure extract directory exists
-        std.fs.makeDirAbsolute(extract_dir) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+        // Ensure extract directory exists (create parent directories if needed)
+        try self.paths.ensureDirExists(extract_dir);
 
         // Extract the archive
         try extract.extractUsingSystemTools(self.allocator, extract_dir, archive_path);
