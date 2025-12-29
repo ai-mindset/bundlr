@@ -102,9 +102,9 @@ Bundlr creates completely isolated execution environments for each command:
 
 ## 🛠 Platform Support
 
-✅ **Linux** (x86_64) - Fully supported
-✅ **macOS** (Intel & Apple Silicon) - Native support
-✅ **Windows** (x86_64) - Complete support
+✅ **Linux** (x86_64) - Fully supported  
+✅ **macOS** (Intel & Apple Silicon) - Native support  
+✅ **Windows** (x86_64) - Complete support  
 
 ## ⚠️ Troubleshooting
 
