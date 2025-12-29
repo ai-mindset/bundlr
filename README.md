@@ -103,6 +103,19 @@ Bundlr creates completely isolated execution environments for each command:
 - **Performance**: Cold start ~10s (download), warm start ~2s (cached)
 - **Architecture**: Single binary written in Zig, no runtime dependencies
 
+## 🔧 Quality & Reliability
+
+Bundlr is built with production-grade standards for safety and maintainability:
+
+- **🛡️ Security-First**: Command injection prevention, input validation, and isolated execution environments
+- **🧪 Comprehensive Testing**: Full integration test suite covering cross-platform functionality and edge cases
+- **⚡ Memory Safety**: Explicit allocator management and proper resource cleanup following Zig best practices
+- **🌐 Cross-Platform**: Native support for Linux, macOS, and Windows with consistent behavior
+- **🔄 Robust Error Handling**: Graceful fallbacks, detailed error reporting, and automatic retry logic
+- **📋 Clean Architecture**: Modular design with clear separation of concerns for long-term maintainability
+
+**Built for reliability** - from individual developers to enterprise CI/CD pipelines.
+
 ### Two Ways to Use
 
 | **GUI Mode** | **CLI Mode** |

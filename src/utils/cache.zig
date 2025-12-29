@@ -233,8 +233,6 @@ pub const Cache = struct {
 
         // Remove oldest entries until under size limit
         for (entries.items) |entry| {
-            defer self.allocator.free(entry.name);
-
             const current_stats = try self.getStats();
             if (current_stats.total_size <= max_size_bytes) {
                 break;
@@ -247,6 +245,11 @@ pub const Cache = struct {
             fs.deleteTreeAbsolute(entry_path) catch |err| {
                 std.log.warn("Failed to remove {s}: {}", .{ entry_path, err });
             };
+        }
+
+        // Clean up all allocated entry names regardless of early break
+        for (entries.items) |entry| {
+            self.allocator.free(entry.name);
         }
     }
 
