@@ -79,6 +79,16 @@ pub const Cache = struct {
 
                 // Successfully acquired lock, store file handle
                 self.lock_file = file;
+
+                // Write PID to lock file for debugging
+                const pid = std.os.getpid();
+                var pid_buf: [32]u8 = undefined;
+                const pid_str = try std.fmt.bufPrint(&pid_buf, "{d}\n", .{pid});
+                try self.lock_file.?.writeAll(pid_str);
+                try self.lock_file.?.sync();
+
+                // Lock already acquired, return early to avoid redundant lock call
+                return;
             },
             else => return err,
         };
