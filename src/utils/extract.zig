@@ -130,16 +130,20 @@ fn extractZipWithSystemUnzip(allocator: std.mem.Allocator, target_dir: []const u
     // Use different commands based on platform
     switch (builtin.os.tag) {
         .windows => {
-            // Windows PowerShell command - use parameter array to prevent injection
+            // Windows PowerShell command - build single command string for -Command
+            const command = try std.fmt.allocPrint(
+                allocator,
+                "& {{Expand-Archive -LiteralPath '{s}' -DestinationPath '{s}' -Force}}",
+                .{ archive_path, target_dir },
+            );
+            defer allocator.free(command);
+
             const args = [_][]const u8{
                 "powershell",
                 "-NoProfile",
                 "-ExecutionPolicy", "Bypass",
                 "-Command",
-                "Expand-Archive",
-                "-Path", archive_path,
-                "-DestinationPath", target_dir,
-                "-Force"
+                command,
             };
 
             var process = std.process.Child.init(&args, allocator);
