@@ -361,8 +361,10 @@ fn showWindowsConsole(allocator: std.mem.Allocator, title: []const u8, command: 
     // Build command string using proper Windows argument escaping
     // First, escape each argument and calculate total length
     var escaped_args: [][]u8 = try allocator.alloc([]u8, command.len);
+    var escaped_count: usize = 0;
     defer {
-        for (escaped_args) |arg| {
+        // Only free successfully allocated arguments
+        for (escaped_args[0..escaped_count]) |arg| {
             allocator.free(arg);
         }
         allocator.free(escaped_args);
@@ -371,6 +373,7 @@ fn showWindowsConsole(allocator: std.mem.Allocator, title: []const u8, command: 
     var total_len: usize = 0;
     for (command, 0..) |arg, i| {
         escaped_args[i] = try escapeWindowsArgument(allocator, arg);
+        escaped_count = i + 1; // Track successful allocations
         if (i > 0) total_len += 1; // space
         total_len += escaped_args[i].len;
     }
