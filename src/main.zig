@@ -315,7 +315,7 @@ fn bootstrapGitApplication(allocator: std.mem.Allocator, config: *const bundlr.c
 
     // Step 5: Execute the application
     print("🎯 Executing application...\n", .{});
-    try executeGitApplication(allocator, &uv_venv_manager, venv_dir, config, app_args);
+    try executeGitApplication(allocator, &uv_venv_manager, venv_dir, extract_dir, config, app_args);
 
     // Step 6: Clean up temporary files
     print("🧹 Cleaning up temporary files...\n", .{});
@@ -340,7 +340,7 @@ fn executePyPiApplication(
     const python_exe = try venv_manager.getVenvPython(venv_dir);
     defer allocator.free(python_exe);
 
-    try executeWithPython(allocator, python_exe, config, app_args);
+    try executeWithPython(allocator, python_exe, ".", config, app_args);
 }
 
 /// Execute Git application using uv virtual environment
@@ -348,6 +348,7 @@ fn executeGitApplication(
     allocator: std.mem.Allocator,
     uv_venv_manager: *bundlr.uv.venv.UvVenvManager,
     venv_dir: []const u8,
+    extract_dir: []const u8,
     config: *const bundlr.config.RuntimeConfig,
     app_args: []const []const u8
 ) !void {
@@ -374,7 +375,7 @@ fn executeGitApplication(
             actual_package_name = try allocator.dupe(u8, name);
 
             // Try running as entry point command first
-            if (tryRunEntryPoint(allocator, venv_dir, name, app_args)) {
+            if (tryRunEntryPoint(allocator, venv_dir, extract_dir, name, app_args)) {
                 print("✅ Application completed successfully\n", .{});
                 return;
             } else |_| {
@@ -393,13 +394,14 @@ fn executeGitApplication(
         modified_config.project_name = name;
     }
 
-    try executeWithPython(allocator, python_exe, &modified_config, app_args);
+    try executeWithPython(allocator, python_exe, extract_dir, &modified_config, app_args);
 }
 
 /// Try to run an application using its entry point command
 fn tryRunEntryPoint(
     allocator: std.mem.Allocator,
     venv_dir: []const u8,
+    working_dir: []const u8,
     package_name: []const u8,
     app_args: []const []const u8
 ) !void {
@@ -429,9 +431,22 @@ fn tryRunEntryPoint(
         arg_count += 1;
     }
 
-    // Execute the entry point command
-    const exit_code = try bundlr.platform.process.run(allocator, cmd_args[0..arg_count], null);
-    if (exit_code != 0) {
+    // Execute the entry point command with long-running service detection
+    if (tryExecuteEntryPoint(allocator, working_dir, cmd_args[0..arg_count])) {
+        return; // Success - either quick command succeeded or long-running service started
+    } else |err| {
+        return err;
+    }
+}
+
+/// Execute entry point with proper handling of long-running services
+fn tryExecuteEntryPoint(allocator: std.mem.Allocator, working_dir: []const u8, args: []const []const u8) !void {
+    // Execute with the correct working directory so the application can find its config files
+    const exit_code = try bundlr.platform.process.run(allocator, args, working_dir);
+
+    if (exit_code == 0) {
+        print("✅ Application completed successfully\n", .{});
+    } else {
         return error.EntryPointExecutionFailed;
     }
 }
@@ -440,6 +455,7 @@ fn tryRunEntryPoint(
 fn executeWithPython(
     allocator: std.mem.Allocator,
     python_exe: []const u8,
+    working_dir: []const u8,
     config: *const bundlr.config.RuntimeConfig,
     app_args: []const []const u8
 ) !void {
@@ -468,7 +484,7 @@ fn executeWithPython(
     }
 
     // Execute the application
-    const exit_code = bundlr.platform.process.run(allocator, cmd_args[0..arg_count], null) catch |err| {
+    const exit_code = bundlr.platform.process.run(allocator, cmd_args[0..arg_count], working_dir) catch |err| {
         print("❌ Failed to execute application: {}\n", .{err});
         return err;
     };

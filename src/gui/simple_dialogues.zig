@@ -359,25 +359,23 @@ fn escapeForNestedCmd(allocator: std.mem.Allocator, command: []const u8) ![]u8 {
 
 fn showWindowsConsole(allocator: std.mem.Allocator, title: []const u8, command: []const []const u8) !void {
     // Build command string using proper Windows argument escaping
-    var cmd_parts = std.ArrayList([]u8).init(allocator);
+    // First, escape each argument and calculate total length
+    var escaped_args: [][]u8 = try allocator.alloc([]u8, command.len);
+    var escaped_count: usize = 0;
     defer {
-        for (cmd_parts.items) |part| {
-            allocator.free(part);
+        // Only free successfully allocated arguments
+        for (escaped_args[0..escaped_count]) |arg| {
+            allocator.free(arg);
         }
-        cmd_parts.deinit();
+        allocator.free(escaped_args);
     }
 
-    // Escape each argument properly
-    for (command) |arg| {
-        const escaped_arg = try escapeWindowsArgument(allocator, arg);
-        try cmd_parts.append(escaped_arg);
-    }
-
-    // Calculate total length for command string
     var total_len: usize = 0;
-    for (cmd_parts.items, 0..) |part, i| {
+    for (command, 0..) |arg, i| {
+        escaped_args[i] = try escapeWindowsArgument(allocator, arg);
+        escaped_count = i + 1; // Track successful allocations
         if (i > 0) total_len += 1; // space
-        total_len += part.len;
+        total_len += escaped_args[i].len;
     }
 
     // Add space for pause command
@@ -389,7 +387,7 @@ fn showWindowsConsole(allocator: std.mem.Allocator, title: []const u8, command: 
     defer allocator.free(cmd_str);
 
     var pos: usize = 0;
-    for (cmd_parts.items, 0..) |part, i| {
+    for (escaped_args, 0..) |part, i| {
         if (i > 0) {
             cmd_str[pos] = ' ';
             pos += 1;
