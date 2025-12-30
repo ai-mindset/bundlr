@@ -117,22 +117,22 @@ Bundlr creates completely isolated execution environments for each command:
 
 ## ❓ FAQ
 
-**Q: How is this different from pipx?**
+Q: How is this different from pipx?
 A: Bundlr requires no installation - it's a single executable that automatically downloads Python and manages everything. pipx requires Python to already be installed.
 
-**Q: Is it safe to run unknown packages?**
+Q: Is it safe to run unknown packages?
 A: Yes. Each run uses a fresh, temporary virtual environment created from bundlr's own downloaded Python runtime, so your existing system Python and its global packages are never imported or modified. Bundlr only reads or writes files in its cache and in the locations you explicitly operate on.
 
-**Q: Where are files stored?**
+Q: Where are files stored?
 A: Platform-specific cache directories:
 - Linux: `~/.cache/bundlr`
 - macOS: `~/Library/Caches/bundlr`
 - Windows: `%LOCALAPPDATA%\bundlr`
 
-**Q: Can I use it for CI/CD?**
+Q: Can I use it for CI/CD?
 A: Absolutely! Perfect for running tools like black, pytest, or custom scripts without setup steps.
 
-**Q: What Python version does it use?**
+Q: What Python version does it use?
 A: Python 3.14 by default, configurable via `BUNDLR_PYTHON_VERSION` environment variable.
 
 ## 📄 License
