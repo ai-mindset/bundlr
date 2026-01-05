@@ -1,5 +1,5 @@
 //! Python runtime embedding for portable executables
-//! Creates optimized Python runtime bundles for different platforms
+//! Creates optimised Python runtime bundles for different platforms
 
 const std = @import("std");
 const bundlr = @import("../bundlr.zig");
@@ -83,11 +83,11 @@ pub const RuntimeMetadata = struct {
     /// Runtime creation timestamp
     created_at: i64,
 
-    /// Original runtime size before optimization
+    /// Original runtime size before optimisation
     original_size_bytes: u64,
 
-    /// Final runtime size after optimization
-    optimized_size_bytes: u64,
+    /// Final runtime size after optimisation
+    optimised_size_bytes: u64,
 
     /// Compression ratio achieved
     compression_ratio: f32,
@@ -129,7 +129,7 @@ pub const RuntimeEmbedder = struct {
         target: pipeline.TargetPlatform,
         optimize_level: pipeline.OptimizeLevel
     ) !?RuntimeBundle {
-        // Create cache key based on version, target, and optimization level
+        // Create cache key based on version, target, and optimisation level
         const cache_key = try std.fmt.allocPrint(
             self.allocator,
             "runtime_{s}_{s}_{s}.tar.gz",
@@ -166,13 +166,13 @@ pub const RuntimeEmbedder = struct {
                 .excluded_modules = &[_][]const u8{},
                 .created_at = std.time.timestamp(),
                 .original_size_bytes = cache_stat.size,
-                .optimized_size_bytes = cache_stat.size,
+                .optimised_size_bytes = cache_stat.size,
                 .compression_ratio = 0.0,
             },
         };
     }
 
-    /// Create an optimized runtime bundle for the target platform
+    /// Create an optimised runtime bundle for the target platform
     pub fn createRuntimeBundle(
         self: *RuntimeEmbedder,
         python_version: []const u8,
@@ -181,7 +181,7 @@ pub const RuntimeEmbedder = struct {
     ) !RuntimeBundle {
         std.debug.print("🐍 Creating Python {s} runtime bundle for {s}...\n", .{ python_version, target.toString() });
 
-        // Check if optimized runtime already exists in cache
+        // Check if optimised runtime already exists in cache
         if (try self.getCachedRuntimeBundle(python_version, target, optimize_level)) |cached_bundle| {
             std.debug.print("✅ Using cached runtime bundle\n", .{});
             return cached_bundle;
@@ -441,7 +441,7 @@ pub const RuntimeEmbedder = struct {
             .excluded_modules = excluded_modules,
             .created_at = std.time.timestamp(),
             .original_size_bytes = original_size,
-            .optimized_size_bytes = optimized_size,
+            .optimised_size_bytes = optimized_size,
             .compression_ratio = compression_ratio,
         };
     }

@@ -338,7 +338,13 @@ pub const AssetCollector = struct {
 
     /// Download asset from URL
     fn downloadAsset(self: *AssetCollector, asset: Asset) ![]u8 {
-        const temp_file = try std.fmt.allocPrint(self.allocator, "/tmp/bundlr_asset_{}", .{std.time.timestamp()});
+        // Extract filename from URL to preserve wheel names
+        const filename = if (std.mem.lastIndexOf(u8, asset.path, "/")) |last_slash|
+            asset.path[last_slash + 1..]
+        else
+            "unknown_asset";
+
+        const temp_file = try std.fmt.allocPrint(self.allocator, "/tmp/{s}", .{filename});
         defer self.allocator.free(temp_file);
 
         try self.http_client.downloadFile(asset.path, temp_file, bundlr.platform.http.printProgress);

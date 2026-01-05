@@ -292,7 +292,7 @@ pub const DependencyResolver = struct {
             }
         }
 
-        // Add optimization flags
+        // Add optimisation flags
         if (exclude_dev_deps and arg_count < cmd_args.len) {
             cmd_args[arg_count] = "--no-deps"; arg_count += 1;
         }

@@ -140,7 +140,7 @@ fn runBuildMode(allocator: std.mem.Allocator, args: []const []const u8) !void {
     print("📦 Package: {s}\n", .{build_options.package});
     print("🎯 Target: {s}\n", .{build_options.target.toString()});
     print("🐍 Python: {s}\n", .{build_options.python_version});
-    print("⚡ Optimize: {s}\n", .{@tagName(build_options.optimize_level)});
+    print("⚡ Optimise: {s}\n", .{@tagName(build_options.optimize_level)});
 
     if (build_options.output_path) |output| {
         print("📄 Output: {s}\n", .{output});
@@ -241,7 +241,7 @@ pub fn main() !void {
         }
     }
 
-    // Default behavior: launch GUI if no arguments (double-click behavior)
+    // Default behaviour: launch GUI if no arguments (double-click behaviour)
     if (args.len == 1) {
         try runGuiMode(allocator);
         return;
@@ -613,8 +613,8 @@ fn printUsage(program_name: []const u8) void {
     print("  --output <file>         Output file path\n", .{});
     print("  --output-dir <dir>      Output directory for multiple targets\n", .{});
     print("  --python-version <ver>  Python version to embed (default: 3.14)\n", .{});
-    print("  --optimize-size         Optimize for smaller executable size\n", .{});
-    print("  --optimize-speed        Optimize for faster runtime performance\n", .{});
+    print("  --optimize-size         Optimise for smaller executable size\n", .{});
+    print("  --optimize-speed        Optimise for faster runtime performance\n", .{});
     print("  --exclude-dev-deps      Exclude development dependencies\n", .{});
     print("  --entry-point <script>  Custom entry point script\n", .{});
 
@@ -639,9 +639,9 @@ fn printBuildUsage() void {
     print("  --output <file>         Output executable file path\n", .{});
     print("  --output-dir <dir>      Directory for multiple target outputs\n", .{});
     print("  --python-version <ver>  Python version to embed (default: 3.14)\n", .{});
-    print("  --optimize-size         Minimize executable size\n", .{});
-    print("  --optimize-speed        Maximize runtime performance\n", .{});
-    print("  --optimize-compatibility Maximum compatibility\n", .{});
+    print("  --optimise-size         Minimise executable size\n", .{});
+    print("  --optimise-speed        Maximise runtime performance\n", .{});
+    print("  --optimise-compatibility Maximum compatibility\n", .{});
     print("  --exclude-dev-deps      Skip development dependencies\n", .{});
     print("  --entry-point <script>  Custom entry point code\n", .{});
 
@@ -649,7 +649,7 @@ fn printBuildUsage() void {
     print("  bundlr build cowsay                           # Build for current platform\n", .{});
     print("  bundlr build cowsay --target linux-x86_64     # Linux 64-bit build\n", .{});
     print("  bundlr build cowsay --target all --output-dir dist/ # All platforms\n", .{});
-    print("  bundlr build httpie --optimize-size           # Size-optimized build\n", .{});
+    print("  bundlr build httpie --optimise-size           # Size-optimised build\n", .{});
     print("  bundlr build https://github.com/user/pkg      # From Git repository\n", .{});
 }
 

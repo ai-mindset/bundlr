@@ -481,16 +481,8 @@ pub const BundleGenerator = struct {
             \\        const asset_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{assets_dir, entry.name});
             \\        defer allocator.free(asset_path);
             \\
-            \\        // Rename file to have proper wheel filename for pip to recognize it
-            \\        const wheel_path = try std.fmt.allocPrint(allocator, "{s}/cowsay-6.1-py3-none-any.whl", .{assets_dir});
-            \\        defer allocator.free(wheel_path);
-            \\        std.fs.renameAbsolute(asset_path, wheel_path) catch {}; // Ignore errors, try original path
-            \\
-            \\        // Installing package
-            \\        const install_path = if (std.fs.openFileAbsolute(wheel_path, .{})) |f| blk: {
-            \\            f.close();
-            \\            break :blk wheel_path;
-            \\        } else |_| asset_path;
+            \\        // Use the original wheel filename - it already has correct format
+            \\        const install_path = asset_path;
             \\
             \\        const install_result = std.process.Child.run(.{
             \\            .allocator = allocator,

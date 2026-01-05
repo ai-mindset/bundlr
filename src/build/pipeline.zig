@@ -370,11 +370,11 @@ pub fn parseBuildOptions(allocator: std.mem.Allocator, args: []const []const u8)
         } else if (std.mem.eql(u8, arg, "--python-version") and i + 1 < args.len) {
             i += 1;
             options.python_version = try allocator.dupe(u8, args[i]);
-        } else if (std.mem.eql(u8, arg, "--optimize-size")) {
+        } else if (std.mem.eql(u8, arg, "--optimise-size")) {
             options.optimize_level = .size;
-        } else if (std.mem.eql(u8, arg, "--optimize-speed")) {
+        } else if (std.mem.eql(u8, arg, "--optimise-speed")) {
             options.optimize_level = .speed;
-        } else if (std.mem.eql(u8, arg, "--optimize-compatibility")) {
+        } else if (std.mem.eql(u8, arg, "--optimise-compatibility")) {
             options.optimize_level = .compatibility;
         } else if (std.mem.eql(u8, arg, "--exclude-dev-deps")) {
             options.exclude_dev_deps = true;
@@ -412,7 +412,7 @@ test "build options parsing" {
         "windows-x86_64",
         "--output",
         "cowsay.exe",
-        "--optimize-size",
+        "--optimise-size",
     };
 
     const options = try parseBuildOptions(allocator, &args);

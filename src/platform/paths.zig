@@ -168,7 +168,7 @@ pub const Paths = struct {
     }
 };
 
-// Legacy compatibility function - migrates the old getCacheDir behavior
+// Legacy compatibility function - migrates the old getCacheDir behaviour
 pub fn getCacheDir(allocator: std.mem.Allocator) ![]const u8 {
     var paths = Paths.init(allocator);
     return try paths.getBundlrCacheDir();
