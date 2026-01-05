@@ -99,6 +99,90 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     print("✅ Launched bundlr in terminal window\n", .{});
 }
 
+/// Build mode - create portable executable from Python package
+fn runBuildMode(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    print("🔨 Bundlr Build Mode\n", .{});
+    print("   Creating portable executable...\n\n", .{});
+
+    if (args.len == 0) {
+        print("❌ Error: No package specified for build\n", .{});
+        print("Usage: bundlr build <package> [options]\n", .{});
+        print("Example: bundlr build cowsay --target linux-x86_64 --output cowsay-linux\n", .{});
+        return;
+    }
+
+    // Parse build options from command line arguments
+    const build_options = bundlr.build.pipeline.parseBuildOptions(allocator, args) catch |err| {
+        switch (err) {
+            error.MissingPackageArgument => {
+                print("❌ Error: Package name is required\n", .{});
+                printBuildUsage();
+            },
+            error.UnknownTargetPlatform => {
+                print("❌ Error: Unknown target platform specified\n", .{});
+                print("Supported platforms: linux-x86_64, linux-aarch64, windows-x86_64, windows-aarch64, macos-x86_64, macos-aarch64, all\n", .{});
+            },
+            else => {
+                print("❌ Error parsing build options: {}\n", .{err});
+            },
+        }
+        return;
+    };
+
+    // Clean up allocated build options on exit
+    defer {
+        if (build_options.output_path) |path| allocator.free(path);
+        if (build_options.output_dir) |dir| allocator.free(dir);
+        if (build_options.entry_point) |ep| allocator.free(ep);
+        allocator.free(build_options.package);
+    }
+
+    print("📦 Package: {s}\n", .{build_options.package});
+    print("🎯 Target: {s}\n", .{build_options.target.toString()});
+    print("🐍 Python: {s}\n", .{build_options.python_version});
+    print("⚡ Optimize: {s}\n", .{@tagName(build_options.optimize_level)});
+
+    if (build_options.output_path) |output| {
+        print("📄 Output: {s}\n", .{output});
+    } else if (build_options.output_dir) |dir| {
+        print("📁 Output Dir: {s}\n", .{dir});
+    }
+
+    print("\n", .{});
+
+    // Initialize and execute build pipeline
+    var pipeline = bundlr.build.pipeline.BuildPipeline.init(allocator, build_options);
+
+    const build_results = pipeline.execute() catch |err| {
+        print("❌ Build failed: {}\n", .{err});
+        return;
+    };
+
+    // Clean up build results
+    defer {
+        for (build_results) |*result| {
+            result.deinit(allocator);
+        }
+        allocator.free(build_results);
+    }
+
+    // Print success summary
+    print("\n🎉 Build completed successfully!\n\n", .{});
+
+    for (build_results) |result| {
+        print("✅ {s}:\n", .{result.target.toString()});
+        print("   📄 File: {s}\n", .{result.executable_path});
+        print("   📏 Size: {} MB\n", .{result.size_bytes / (1024 * 1024)});
+        print("   ⏱️  Time: {}ms\n", .{result.build_duration_ms});
+        print("\n", .{});
+    }
+
+    print("🚀 Your portable executable(s) are ready to run!\n", .{});
+    if (build_results.len == 1) {
+        print("   Try running: {s}\n", .{build_results[0].executable_path});
+    }
+}
+
 /// Internal function to run a package (extracted from main logic)
 fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app_args: []const []const u8) !bool {
     // Auto-detect mode and create configuration
@@ -149,6 +233,10 @@ pub fn main() !void {
             return;
         } else if (std.mem.eql(u8, args[1], "--gui")) {
             try runGuiMode(allocator);
+            return;
+        } else if (std.mem.eql(u8, args[1], "build")) {
+            // Handle build command for portable executable generation
+            try runBuildMode(allocator, args[2..]);
             return;
         }
     }
@@ -500,21 +588,35 @@ fn executeWithPython(
 /// Print usage information
 fn printUsage(program_name: []const u8) void {
     print("bundlr - Execute Python packages from PyPI or Git repositories\n", .{});
+    print("         Create portable executables for cross-platform distribution\n", .{});
 
     print("\nUSAGE:\n", .{});
     print("  {s}                                   # GUI mode (default)\n", .{program_name});
     print("  {s} <package> [args...]               # Run PyPI package\n", .{program_name});
     print("  {s} <repository> [args...]            # Run from Git repository\n", .{program_name});
+    print("  {s} build <package> [options...]      # Create portable executable\n", .{program_name});
 
     print("\nEXAMPLES:\n", .{});
     print("  {s} cowsay \"Hello World\"              # PyPI package with arguments\n", .{program_name});
     print("  {s} httpie GET httpbin.org/json        # HTTP client tool\n", .{program_name});
     print("  {s} youtube-dl --help                  # Show package help\n", .{program_name});
     print("  {s} https://github.com/psf/black       # Git repository\n", .{program_name});
+    print("  {s} build cowsay --target linux-x86_64 # Create portable executable\n", .{program_name});
+    print("  {s} build httpie --target all --output-dir dist/ # Multi-platform build\n", .{program_name});
 
     print("\nOPTIONS:\n", .{});
     print("  -h, --help              Show this help message\n", .{});
     print("      --gui               Launch GUI mode explicitly\n", .{});
+
+    print("\nBUILD OPTIONS:\n", .{});
+    print("  --target <platform>     Target platform (linux-x86_64, windows-x86_64, macos-aarch64, all)\n", .{});
+    print("  --output <file>         Output file path\n", .{});
+    print("  --output-dir <dir>      Output directory for multiple targets\n", .{});
+    print("  --python-version <ver>  Python version to embed (default: 3.14)\n", .{});
+    print("  --optimize-size         Optimize for smaller executable size\n", .{});
+    print("  --optimize-speed        Optimize for faster runtime performance\n", .{});
+    print("  --exclude-dev-deps      Exclude development dependencies\n", .{});
+    print("  --entry-point <script>  Custom entry point script\n", .{});
 
     print("\nENVIRONMENT:\n", .{});
     print("  BUNDLR_PYTHON_VERSION   Python version (default: 3.14)\n", .{});
@@ -522,7 +624,33 @@ fn printUsage(program_name: []const u8) void {
     print("  BUNDLR_CACHE_DIR        Custom cache directory\n", .{});
 
     print("\nBundlr automatically manages Python distributions, virtual environments,\n", .{});
-    print("and package installations for seamless execution.\n", .{});
+    print("and package installations for seamless execution and distribution.\n", .{});
+}
+
+/// Print build-specific usage information
+fn printBuildUsage() void {
+    print("\nBUILD USAGE:\n", .{});
+    print("  bundlr build <package> [options...]\n", .{});
+
+    print("\nBUILD OPTIONS:\n", .{});
+    print("  --target <platform>     Target platform to build for\n", .{});
+    print("    Platforms: linux-x86_64, linux-aarch64, windows-x86_64,\n", .{});
+    print("               windows-aarch64, macos-x86_64, macos-aarch64, all\n", .{});
+    print("  --output <file>         Output executable file path\n", .{});
+    print("  --output-dir <dir>      Directory for multiple target outputs\n", .{});
+    print("  --python-version <ver>  Python version to embed (default: 3.14)\n", .{});
+    print("  --optimize-size         Minimize executable size\n", .{});
+    print("  --optimize-speed        Maximize runtime performance\n", .{});
+    print("  --optimize-compatibility Maximum compatibility\n", .{});
+    print("  --exclude-dev-deps      Skip development dependencies\n", .{});
+    print("  --entry-point <script>  Custom entry point code\n", .{});
+
+    print("\nBUILD EXAMPLES:\n", .{});
+    print("  bundlr build cowsay                           # Build for current platform\n", .{});
+    print("  bundlr build cowsay --target linux-x86_64     # Linux 64-bit build\n", .{});
+    print("  bundlr build cowsay --target all --output-dir dist/ # All platforms\n", .{});
+    print("  bundlr build httpie --optimize-size           # Size-optimized build\n", .{});
+    print("  bundlr build https://github.com/user/pkg      # From Git repository\n", .{});
 }
 
 test "bundlr config integration" {

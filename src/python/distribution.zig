@@ -169,7 +169,7 @@ pub const DistributionManager = struct {
             return;
         }
 
-        std.log.info("Downloading Python {s} distribution...", .{python_version});
+        // Downloading Python distribution
 
         const dist_info = self.getDistributionInfo(python_version);
         const download_url = try dist_info.downloadUrl(self.allocator);
@@ -187,7 +187,7 @@ pub const DistributionManager = struct {
         const archive_path = try std.fs.path.join(self.allocator, &.{ downloads_dir, filename });
         defer self.allocator.free(archive_path);
 
-        std.log.info("Downloading from: {s}", .{download_url});
+        // Downloading from python-build-standalone
         try self.http_client.downloadFile(download_url, archive_path, progress_fn);
 
         // Extract to Python install directory
