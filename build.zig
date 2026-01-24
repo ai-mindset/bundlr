@@ -39,6 +39,7 @@ pub fn build(b: *std.Build) void {
         // Later on we'll use this module as the root module of a test executable
         // which requires us to specify a target.
         .target = target,
+        .optimize = optimize,
     });
 
     // Build-time configuration options
@@ -72,6 +73,8 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .single_threaded = true,
+            .strip = true,
             .imports = &.{
                 .{ .name = "bundlr", .module = mod },
                 .{ .name = "build_options", .module = build_options.createModule() },

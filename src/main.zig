@@ -51,7 +51,7 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     print("\n🚀 Running bundlr...\n\n", .{});
 
     // Parse arguments into fixed array
-    var args_array: [16][]const u8 = undefined; // Support up to 16 arguments
+    var args_array: [8][]const u8 = undefined; // Support up to 8 arguments (reduced memory usage)
     var arg_count: usize = 0;
 
     if (args_result.text.len > 0) {
@@ -65,7 +65,7 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     }
 
     // Build command to execute in terminal window
-    var cmd_args: [32][]const u8 = undefined;
+    var cmd_args: [16][]const u8 = undefined; // Reduced from 32 to 16 for better memory efficiency
     var cmd_count: usize = 0;
 
     // Get the current executable path
@@ -183,17 +183,17 @@ fn runBuildMode(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 }
 
-/// Internal function to run a package (extracted from main logic)
-fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app_args: []const []const u8) !bool {
-    // Auto-detect mode and create configuration
+/// Helper function to create runtime configuration
+fn createRuntimeConfig(allocator: std.mem.Allocator, package_arg: []const u8) !bundlr.config.RuntimeConfig {
     const build_config = bundlr.config.BuildConfig{};
-    var config = if (isGitRepository(package_arg))
+    return if (isGitRepository(package_arg))
         try bundlr.config.createGit(allocator, package_arg, build_config.default_python_version, null)
     else
         try bundlr.config.create(allocator, package_arg, "1.0.0", build_config.default_python_version);
-    defer config.deinit();
+}
 
-    // Print bootstrap message based on source mode
+/// Print bootstrap message for configuration
+fn printBootstrapMessage(config: *const bundlr.config.RuntimeConfig) void {
     switch (config.source_mode) {
         .pypi => {
             print("🚀 Bundlr: Bootstrapping {s} v{s} (Python {s})\n", .{
@@ -209,8 +209,18 @@ fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app
             });
         },
     }
+}
 
-    // Run the bootstrap process (same as CLI mode)
+/// Internal function to run a package (extracted from main logic)
+fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app_args: []const []const u8) !bool {
+    // Auto-detect mode and create configuration
+    var config = try createRuntimeConfig(allocator, package_arg);
+    defer config.deinit();
+
+    // Print bootstrap message
+    printBootstrapMessage(&config);
+
+    // Run the bootstrap process
     try bootstrapApplication(allocator, &config, app_args);
 
     return true; // Success
@@ -220,7 +230,9 @@ fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     // Parse command line arguments
     const args = try std.process.argsAlloc(allocator);
@@ -254,31 +266,11 @@ pub fn main() !void {
     const app_args = if (args.len > 2) args[2..] else &[_][]const u8{};
 
     // Auto-detect mode and create configuration
-    const build_config = bundlr.config.BuildConfig{};
-    var config = if (isGitRepository(package_arg))
-        try bundlr.config.createGit(allocator, package_arg, build_config.default_python_version, null)
-    else
-        try bundlr.config.create(allocator, package_arg, "1.0.0", build_config.default_python_version);
+    var config = try createRuntimeConfig(allocator, package_arg);
     defer config.deinit();
 
-    // Print bootstrap message based on source mode
-    switch (config.source_mode) {
-        .pypi => {
-            print("🚀 Bundlr: Bootstrapping {s} v{s} (Python {s})\n", .{
-                config.project_name,
-                config.project_version,
-                config.python_version,
-            });
-        },
-        .git => {
-            print("🚀 Bundlr: Bootstrapping from {s} (Python {s})\n", .{
-                config.git_repository.?,
-                config.python_version,
-            });
-        },
-    }
-
-    // Run the bootstrap process
+    // Print bootstrap message and run bootstrap process
+    printBootstrapMessage(&config);
     try bootstrapApplication(allocator, &config, app_args);
 }
 
@@ -507,7 +499,7 @@ fn tryRunEntryPoint(
     std.fs.accessAbsolute(entry_point_path, .{}) catch return error.EntryPointNotFound;
 
     // Build command arguments
-    var cmd_args: [32][]const u8 = undefined; // Fixed size array
+    var cmd_args: [16][]const u8 = undefined; // Fixed size array
     var arg_count: usize = 0;
 
     cmd_args[arg_count] = entry_point_path; arg_count += 1;
@@ -548,7 +540,7 @@ fn executeWithPython(
     app_args: []const []const u8
 ) !void {
     // Build command arguments
-    var cmd_args: [32][]const u8 = undefined; // Fixed size array
+    var cmd_args: [16][]const u8 = undefined; // Fixed size array
     var arg_count: usize = 0;
 
     // Try different execution methods
