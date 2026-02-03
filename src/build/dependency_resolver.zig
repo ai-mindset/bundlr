@@ -246,8 +246,12 @@ pub const DependencyResolver = struct {
         defer file.close();
 
         if (self.isGitRepository(package)) {
+            // Validate and potentially fix Git repository URL
+            const validated_package = try self.validateGitUrl(package);
+            defer self.allocator.free(validated_package);
+
             // Git repository specification
-            const content = try std.fmt.allocPrint(self.allocator, "git+{s}\n", .{package});
+            const content = try std.fmt.allocPrint(self.allocator, "git+{s}\n", .{validated_package});
             defer self.allocator.free(content);
             try file.writeAll(content);
         } else {
@@ -436,6 +440,35 @@ pub const DependencyResolver = struct {
                std.mem.startsWith(u8, package, "git@") or
                std.mem.indexOf(u8, package, "github.com") != null or
                std.mem.indexOf(u8, package, "gitlab.com") != null;
+    }
+
+    /// Validate and fix common Git repository URL issues
+    fn validateGitUrl(self: *DependencyResolver, package: []const u8) ![]u8 {
+        // Check for common GitHub URL mistakes
+        if (std.mem.startsWith(u8, package, "https://github/")) {
+            // Missing .com - common mistake
+            const fixed_url = try std.fmt.allocPrint(
+                self.allocator,
+                "https://github.com{s}",
+                .{package[14..]} // Skip "https://github"
+            );
+            std.log.warn("Fixed malformed GitHub URL: {s} -> {s}", .{ package, fixed_url });
+            return fixed_url;
+        }
+
+        if (std.mem.startsWith(u8, package, "http://github/")) {
+            // Missing .com and using http instead of https
+            const fixed_url = try std.fmt.allocPrint(
+                self.allocator,
+                "https://github.com{s}",
+                .{package[13..]} // Skip "http://github"
+            );
+            std.log.warn("Fixed malformed GitHub URL: {s} -> {s}", .{ package, fixed_url });
+            return fixed_url;
+        }
+
+        // Return original if no issues found
+        return try self.allocator.dupe(u8, package);
     }
 };
 

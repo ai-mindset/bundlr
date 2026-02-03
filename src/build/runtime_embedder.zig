@@ -380,30 +380,11 @@ pub const RuntimeEmbedder = struct {
             .{archive_name}
         );
 
-        // Create compressed archive using tar with fast compression
-        const tar_args = [_][]const u8{
-            "tar",
-            "-C",
-            std.fs.path.dirname(runtime_dir).?,
-            "-czf",
-            archive_path,
-            std.fs.path.basename(runtime_dir),
-        };
-
         std.debug.print("  🔧 Creating archive: {s}\n", .{archive_path});
         std.debug.print("  📂 Source directory: {s}\n", .{runtime_dir});
-        std.debug.print("  💻 Running tar command...\n", .{});
 
-        const result = try bundlr.platform.process.run(
-            self.allocator,
-            &tar_args,
-            "."
-        );
-
-        if (result != 0) {
-            std.debug.print("  ❌ tar command failed with exit code: {}\n", .{result});
-            return error.ArchiveCreationFailed;
-        }
+        // Use platform-specific archive creation
+        try self.createArchiveWithSystemTools(runtime_dir, archive_path);
 
         // Verify the file was created
         const file = std.fs.openFileAbsolute(archive_path, .{}) catch |err| {
@@ -414,6 +395,117 @@ pub const RuntimeEmbedder = struct {
 
         std.debug.print("  ✅ Archive verified: {s}\n", .{archive_path});
         return archive_path;
+    }
+
+    /// Create archive using platform-appropriate tools
+    fn createArchiveWithSystemTools(
+        self: *RuntimeEmbedder,
+        source_dir: []const u8,
+        archive_path: []const u8
+    ) !void {
+        const builtin = @import("builtin");
+
+        switch (builtin.os.tag) {
+            .windows => {
+                // On Windows, use PowerShell Compress-Archive (creates .zip, not .tar.gz)
+                // For compatibility, we'll create a .zip file instead when tar is unavailable
+                const zip_path = try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s}.zip",
+                    .{archive_path[0..archive_path.len - 7]} // Remove .tar.gz extension
+                );
+                defer self.allocator.free(zip_path);
+
+                const command = try std.fmt.allocPrint(
+                    self.allocator,
+                    "& {{Compress-Archive -LiteralPath '{s}' -DestinationPath '{s}' -CompressionLevel Fastest -Force}}",
+                    .{ source_dir, zip_path },
+                );
+                defer self.allocator.free(command);
+
+                const args = [_][]const u8{
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy", "Bypass",
+                    "-Command",
+                    command,
+                };
+
+                std.debug.print("  💻 Using PowerShell to create archive on Windows...\n", .{});
+                const result = try bundlr.platform.process.run(
+                    self.allocator,
+                    &args,
+                    "."
+                );
+
+                if (result != 0) {
+                    // Fallback: try using tar on Windows 10+ (if available)
+                    std.debug.print("  ⚠️  PowerShell failed, trying system tar...\n", .{});
+                    try self.createArchiveWithTar(source_dir, archive_path);
+                } else {
+                    // Copy the zip file to the expected tar.gz location for consistency
+                    try self.copyFile(zip_path, archive_path);
+                    std.fs.deleteFileAbsolute(zip_path) catch {};
+                }
+            },
+            else => {
+                // Unix-like systems: use tar
+                try self.createArchiveWithTar(source_dir, archive_path);
+            },
+        }
+    }
+
+    /// Create archive using tar command (Unix/Linux/macOS or Windows 10+)
+    fn createArchiveWithTar(
+        self: *RuntimeEmbedder,
+        source_dir: []const u8,
+        archive_path: []const u8
+    ) !void {
+        const tar_args = [_][]const u8{
+            "tar",
+            "-C",
+            std.fs.path.dirname(source_dir).?,
+            "-czf",
+            archive_path,
+            std.fs.path.basename(source_dir),
+        };
+
+        std.debug.print("  💻 Running tar command...\n", .{});
+        const result = bundlr.platform.process.run(
+            self.allocator,
+            &tar_args,
+            "."
+        ) catch |err| {
+            if (err == error.FileNotFound) {
+                std.debug.print("  ❌ tar executable not found\n", .{});
+                return error.TarNotAvailable;
+            }
+            return err;
+        };
+
+        if (result != 0) {
+            std.debug.print("  ❌ tar command failed with exit code: {}\n", .{result});
+            return error.ArchiveCreationFailed;
+        }
+    }
+
+    /// Copy file (simple implementation for fallback)
+    fn copyFile(self: *RuntimeEmbedder, src_path: []const u8, dest_path: []const u8) !void {
+        _ = self;
+        const src_file = try std.fs.openFileAbsolute(src_path, .{});
+        defer src_file.close();
+
+        const dest_file = try std.fs.createFileAbsolute(dest_path, .{});
+        defer dest_file.close();
+
+        const buffer_size = 64 * 1024; // 64KB buffer
+        var buffer: [buffer_size]u8 = undefined;
+
+        while (true) {
+            const bytes_read = try src_file.read(&buffer);
+            if (bytes_read == 0) break;
+            try dest_file.writeAll(buffer[0..bytes_read]);
+        }
     }
 
     /// Generate runtime metadata
