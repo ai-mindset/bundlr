@@ -123,8 +123,13 @@ pub const DistributionManager = struct {
         };
     }
 
-    /// Get distribution info for the specified Python version
+    /// Get distribution info for the specified Python version (uses host platform)
     pub fn getDistributionInfo(self: *Self, python_version: []const u8) DistributionInfo {
+        return self.getDistributionInfoForTarget(python_version, Platform.current(), Architecture.current());
+    }
+
+    /// Get distribution info for a specific target platform
+    pub fn getDistributionInfoForTarget(self: *Self, python_version: []const u8, platform: Platform, arch: Architecture) DistributionInfo {
         _ = self;
         // Map major.minor versions to full versions available in releases
         const full_python_version = if (std.mem.eql(u8, python_version, "3.14"))
@@ -138,8 +143,8 @@ pub const DistributionManager = struct {
 
         return DistributionInfo{
             .python_version = full_python_version,
-            .platform = Platform.current(),
-            .architecture = Architecture.current(),
+            .platform = platform,
+            .architecture = arch,
             .build_version = build_version,
         };
     }
@@ -206,6 +211,95 @@ pub const DistributionManager = struct {
         }
     }
 
+    /// Download a Python distribution for a specific target platform
+    pub fn ensureDistributionForTarget(
+        self: *Self,
+        python_version: []const u8,
+        platform: Platform,
+        arch: Architecture,
+        progress_fn: ?http.ProgressFn,
+    ) !void {
+        // Check if already cached (use target-specific cache path)
+        const cache_key = try std.fmt.allocPrint(self.allocator, "{s}-{s}-{s}", .{
+            python_version,
+            platform.toString(),
+            arch.toString(),
+        });
+        defer self.allocator.free(cache_key);
+
+        const install_dir = try self.getTargetInstallDir(python_version, platform, arch);
+        defer self.allocator.free(install_dir);
+
+        // Check if already cached
+        const marker_path = try std.fs.path.join(self.allocator, &.{ install_dir, ".bundlr_complete" });
+        defer self.allocator.free(marker_path);
+        if (std.fs.accessAbsolute(marker_path, .{})) |_| {
+            std.log.info("Python {s} for {s} already cached", .{ python_version, platform.toString() });
+            return;
+        } else |_| {}
+
+        const dist_info = self.getDistributionInfoForTarget(python_version, platform, arch);
+        const download_url = try dist_info.downloadUrl(self.allocator);
+        defer self.allocator.free(download_url);
+
+        // Create downloads directory
+        const downloads_dir = try self.paths.getDownloadsDir();
+        defer self.allocator.free(downloads_dir);
+        try self.paths.ensureDirExists(downloads_dir);
+
+        // Download the archive
+        const filename = try dist_info.filename(self.allocator);
+        defer self.allocator.free(filename);
+
+        const archive_path = try std.fs.path.join(self.allocator, &.{ downloads_dir, filename });
+        defer self.allocator.free(archive_path);
+
+        std.log.info("Downloading Python {s} for {s}...", .{ python_version, platform.toString() });
+        try self.http_client.downloadFile(download_url, archive_path, progress_fn);
+
+        // Extract to target-specific install directory
+        try self.paths.ensureDirExists(install_dir);
+
+        std.log.info("Extracting Python distribution to: {s}", .{install_dir});
+        try self.extractDistributionForTarget(archive_path, install_dir, platform);
+
+        // Create completion marker
+        const marker_file = std.fs.createFileAbsolute(marker_path, .{}) catch |err| {
+            std.log.warn("Failed to create cache marker: {}", .{err});
+            return;
+        };
+        marker_file.close();
+
+        std.log.info("Python {s} for {s} successfully installed", .{ python_version, platform.toString() });
+    }
+
+    /// Get target-specific install directory
+    fn getTargetInstallDir(self: *Self, python_version: []const u8, platform: Platform, arch: Architecture) ![]u8 {
+        const cache_dir = try self.paths.getBundlrCacheDir();
+        defer self.allocator.free(cache_dir);
+
+        const dir_name = try std.fmt.allocPrint(self.allocator, "{s}-{s}-{s}", .{
+            python_version,
+            platform.toString(),
+            arch.toString(),
+        });
+        defer self.allocator.free(dir_name);
+
+        return try std.fs.path.join(self.allocator, &.{ cache_dir, "python", dir_name });
+    }
+
+    /// Get Python executable path for a specific target platform
+    pub fn getPythonExecutableForTarget(self: *Self, python_version: []const u8, platform: Platform, arch: Architecture) ![]u8 {
+        const install_dir = try self.getTargetInstallDir(python_version, platform, arch);
+        defer self.allocator.free(install_dir);
+
+        // Windows: python.exe at root; Unix: bin/python3
+        return switch (platform) {
+            .windows => try std.fs.path.join(self.allocator, &.{ install_dir, "python.exe" }),
+            else => try std.fs.path.join(self.allocator, &.{ install_dir, "bin", "python3" }),
+        };
+    }
+
     /// Extract a Python distribution archive
     fn extractDistribution(self: *Self, archive_path: []const u8, target_dir: []const u8) !void {
         std.log.info("Extracting {s} to {s}", .{ archive_path, target_dir });
@@ -213,9 +307,19 @@ pub const DistributionManager = struct {
         // Use system tools for extraction (tar/unzip)
         try extract.extractUsingSystemTools(self.allocator, target_dir, archive_path);
 
-        // Python distributions typically extract to a subdirectory like "python/install"
-        // We need to move the contents up one level or adjust our paths accordingly
+        // Python distributions typically extract to "python/install/" structure
+        // We need to flatten this to have Python files at the root
         try self.flattenPythonDistribution(target_dir);
+    }
+
+    /// Extract a Python distribution archive for a specific target platform
+    fn extractDistributionForTarget(self: *Self, archive_path: []const u8, target_dir: []const u8, target_platform: Platform) !void {
+        std.log.info("Extracting {s} to {s}", .{ archive_path, target_dir });
+
+        try extract.extractUsingSystemTools(self.allocator, target_dir, archive_path);
+
+        // Flatten nested python/install/ structure
+        try self.flattenPythonDistributionForTarget(target_dir, target_platform);
     }
 
     /// Flatten Python distribution structure after extraction
@@ -277,6 +381,77 @@ pub const DistributionManager = struct {
 
             std.fs.accessAbsolute(marker_path, .{}) catch continue;
             return true; // Found at least one marker
+        }
+        return false;
+    }
+
+    /// Flatten Python distribution for a specific target platform
+    /// Handles python-build-standalone's nested python/install/ structure
+    fn flattenPythonDistributionForTarget(self: *Self, target_dir: []const u8, target_platform: Platform) !void {
+        // python-build-standalone extracts to: python/install/[actual files]
+        // We need to move contents from python/install/ to target_dir
+
+        // First, try the standard python/install path
+        const python_install_path = try std.fs.path.join(self.allocator, &.{ target_dir, "python", "install" });
+        defer self.allocator.free(python_install_path);
+
+        if (self.isPythonInstallationDirForTarget(python_install_path, target_platform)) {
+            std.log.info("Flattening python/install/ structure", .{});
+            try self.moveDirectoryContents(python_install_path, target_dir);
+            // Clean up empty directories
+            std.fs.deleteDirAbsolute(python_install_path) catch {};
+            const python_dir = try std.fs.path.join(self.allocator, &.{ target_dir, "python" });
+            defer self.allocator.free(python_dir);
+            std.fs.deleteDirAbsolute(python_dir) catch {};
+            return;
+        }
+
+        // Fallback: try single subdirectory pattern
+        var dir = std.fs.openDirAbsolute(target_dir, .{ .iterate = true }) catch return;
+        defer dir.close();
+
+        var iterator = dir.iterate();
+        var found_subdir: ?[]const u8 = null;
+        var dir_count: u32 = 0;
+
+        while (try iterator.next()) |entry| {
+            if (entry.kind == .directory) {
+                dir_count += 1;
+                if (found_subdir == null) {
+                    found_subdir = try self.allocator.dupe(u8, entry.name);
+                } else {
+                    if (found_subdir) |prev| self.allocator.free(prev);
+                    found_subdir = null;
+                    break;
+                }
+            }
+        }
+        defer if (found_subdir) |name| self.allocator.free(name);
+
+        if (dir_count == 1 and found_subdir != null) {
+            const subdir_path = try std.fs.path.join(self.allocator, &.{ target_dir, found_subdir.? });
+            defer self.allocator.free(subdir_path);
+
+            if (self.isPythonInstallationDirForTarget(subdir_path, target_platform)) {
+                try self.moveDirectoryContents(subdir_path, target_dir);
+                std.fs.deleteDirAbsolute(subdir_path) catch {};
+            }
+        }
+    }
+
+    /// Check if a directory looks like a Python installation for target platform
+    fn isPythonInstallationDirForTarget(self: *Self, dir_path: []const u8, target_platform: Platform) bool {
+        const markers = switch (target_platform) {
+            .windows => [_][]const u8{ "python.exe", "Scripts", "Lib" },
+            else => [_][]const u8{ "bin", "lib", "include" },
+        };
+
+        for (markers) |marker| {
+            const marker_path = std.fs.path.join(self.allocator, &.{ dir_path, marker }) catch continue;
+            defer self.allocator.free(marker_path);
+
+            std.fs.accessAbsolute(marker_path, .{}) catch continue;
+            return true;
         }
         return false;
     }

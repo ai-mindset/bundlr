@@ -235,20 +235,52 @@ pub const RuntimeEmbedder = struct {
 
     /// Ensure base Python distribution is available
     fn ensureBaseRuntime(self: *RuntimeEmbedder, config: RuntimeConfig) ![]u8 {
-        // Use existing distribution manager to get Python
-        try self.distribution_manager.ensureDistribution(
+        // Convert pipeline target to distribution platform/arch
+        const dist_platform = targetToPlatform(config.target_platform);
+        const dist_arch = targetToArch(config.target_platform);
+
+        // Download Python for the TARGET platform (not host)
+        try self.distribution_manager.ensureDistributionForTarget(
             config.python_version,
-            bundlr.platform.http.printProgress
+            dist_platform,
+            dist_arch,
+            bundlr.platform.http.printProgress,
         );
 
-        const python_exe = try self.distribution_manager.getPythonExecutable(config.python_version);
+        const python_exe = try self.distribution_manager.getPythonExecutableForTarget(
+            config.python_version,
+            dist_platform,
+            dist_arch,
+        );
         defer self.allocator.free(python_exe);
 
         // Get the base distribution directory
+        // On Windows, python.exe is at root of install dir (no bin/ subdirectory)
+        // On Unix, python3 is in bin/, so we need parent of bin/
         const python_dir = std.fs.path.dirname(python_exe) orelse return error.InvalidPythonPath;
-        const base_dir = std.fs.path.dirname(python_dir) orelse return error.InvalidPythonPath;
+        const base_dir = switch (config.target_platform) {
+            .windows_x86_64, .windows_aarch64 => python_dir,
+            else => std.fs.path.dirname(python_dir) orelse return error.InvalidPythonPath,
+        };
 
         return try self.allocator.dupe(u8, base_dir);
+    }
+
+    /// Convert pipeline target to distribution Platform
+    fn targetToPlatform(target: pipeline.TargetPlatform) bundlr.python.distribution.Platform {
+        return switch (target) {
+            .windows_x86_64, .windows_aarch64 => .windows,
+            .macos_x86_64, .macos_aarch64 => .macos,
+            .linux_x86_64, .linux_aarch64, .all => .linux,
+        };
+    }
+
+    /// Convert pipeline target to distribution Architecture
+    fn targetToArch(target: pipeline.TargetPlatform) bundlr.python.distribution.Architecture {
+        return switch (target) {
+            .linux_aarch64, .macos_aarch64, .windows_aarch64 => .aarch64,
+            .linux_x86_64, .macos_x86_64, .windows_x86_64, .all => .x86_64,
+        };
     }
 
     /// Create working directory for bundle operations
@@ -583,9 +615,10 @@ pub const RuntimeEmbedder = struct {
         return result;
     }
 
-    /// Copy directory recursively
+    /// Copy directory contents recursively (not the directory itself)
     fn copyDirectory(self: *RuntimeEmbedder, src: []const u8, dest: []const u8) !void {
-        const cp_args = [_][]const u8{ "cp", "-r", src, dest };
+        // Use cp -rT to copy contents INTO dest, not as a subdirectory of dest
+        const cp_args = [_][]const u8{ "cp", "-rT", src, dest };
         const result = try bundlr.platform.process.run(
             self.allocator,
             &cp_args,
