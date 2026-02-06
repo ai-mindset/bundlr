@@ -300,6 +300,83 @@ pub const BundleGenerator = struct {
             \\    };
             \\}
             \\
+            \\fn extractTarGz(allocator: std.mem.Allocator, archive_path: []const u8, target_dir: []const u8, strip_components: ?u32) !void {
+            \\    const builtin = @import("builtin");
+            \\    switch (builtin.os.tag) {
+            \\        .windows => {
+            \\            // Two-stage: decompress gzip with PowerShell, then extract tar
+            \\            const tar_path = try allocator.dupe(u8, archive_path[0..archive_path.len-3]);
+            \\            defer allocator.free(tar_path);
+            \\            // Decompress gzip using .NET GZipStream
+            \\            const decompress_cmd = try std.fmt.allocPrint(allocator,
+            \\                "$in = [System.IO.File]::OpenRead('{s}'); " ++
+            \\                "$out = [System.IO.File]::Create('{s}'); " ++
+            \\                "$gz = New-Object System.IO.Compression.GZipStream($in, [System.IO.Compression.CompressionMode]::Decompress); " ++
+            \\                "$gz.CopyTo($out); $gz.Close(); $out.Close(); $in.Close()",
+            \\                .{ archive_path, tar_path });
+            \\            defer allocator.free(decompress_cmd);
+            \\            const decomp_result = std.process.Child.run(.{
+            \\                .allocator = allocator,
+            \\                .argv = &[_][]const u8{ "powershell", "-NoProfile", "-Command", decompress_cmd },
+            \\            }) catch |err| {
+            \\                std.log.err("PowerShell gzip decompress failed: {}", .{err});
+            \\                return err;
+            \\            };
+            \\            defer allocator.free(decomp_result.stdout);
+            \\            defer allocator.free(decomp_result.stderr);
+            \\            if (decomp_result.term != .Exited or decomp_result.term.Exited != 0) {
+            \\                std.log.err("Gzip decompression failed: {s}", .{decomp_result.stderr});
+            \\                return error.ExtractionFailed;
+            \\            }
+            \\            // Extract tar (without -z flag)
+            \\            const tar_argv = if (strip_components) |sc| blk: {
+            \\                const strip_arg = try std.fmt.allocPrint(allocator, "--strip-components={}", .{sc});
+            \\                break :blk &[_][]const u8{ "tar", "-xf", tar_path, "-C", target_dir, strip_arg };
+            \\            } else &[_][]const u8{ "tar", "-xf", tar_path, "-C", target_dir };
+            \\            const result = std.process.Child.run(.{
+            \\                .allocator = allocator,
+            \\                .argv = tar_argv,
+            \\            }) catch |err| {
+            \\                std.log.err("tar extraction failed: {}", .{err});
+            \\                return err;
+            \\            };
+            \\            defer allocator.free(result.stdout);
+            \\            defer allocator.free(result.stderr);
+            \\            if (result.term != .Exited or result.term.Exited != 0) {
+            \\                std.log.err("tar extraction failed: {s}", .{result.stderr});
+            \\                return error.ExtractionFailed;
+            \\            }
+            \\            // Cleanup intermediate tar file
+            \\            std.fs.deleteFileAbsolute(tar_path) catch {};
+            \\        },
+            \\        else => {
+            \\            // Unix: use tar directly
+            \\            const tar_argv = if (strip_components) |sc| blk: {
+            \\                const strip_arg = try std.fmt.allocPrint(allocator, "--strip-components={}", .{sc});
+            \\                break :blk &[_][]const u8{ "tar", "-xzf", archive_path, "-C", target_dir, strip_arg };
+            \\            } else &[_][]const u8{ "tar", "-xzf", archive_path, "-C", target_dir };
+            \\            const result = try std.process.Child.run(.{
+            \\                .allocator = allocator,
+            \\                .argv = tar_argv,
+            \\            });
+            \\            defer allocator.free(result.stdout);
+            \\            defer allocator.free(result.stderr);
+            \\            if (result.term != .Exited or result.term.Exited != 0) {
+            \\                std.log.err("tar extraction failed: {s}", .{result.stderr});
+            \\                return error.ExtractionFailed;
+            \\            }
+            \\        },
+            \\    }
+            \\}
+            \\
+            \\fn getPythonExePath(allocator: std.mem.Allocator, temp_dir: []const u8) ![]u8 {
+            \\    const builtin = @import("builtin");
+            \\    return switch (builtin.os.tag) {
+            \\        .windows => try std.fmt.allocPrint(allocator, "{s}\\\\python_runtime\\\\python.exe", .{temp_dir}),
+            \\        else => try std.fmt.allocPrint(allocator, "{s}/python_runtime/bin/python3", .{temp_dir}),
+            \\    };
+            \\}
+            \\
             \\fn extractBundle(allocator: std.mem.Allocator, temp_dir: []const u8) !void {
             \\
             \\    // Read the current executable to find the embedded bundle
@@ -383,47 +460,16 @@ pub const BundleGenerator = struct {
             \\        return err;
             \\    };
             \\
-            \\    // Check if tar exists before extraction
-            \\    const tar_check = std.process.Child.run(.{
-            \\        .allocator = allocator,
-            \\        .argv = &[_][]const u8{ "/bin/tar", "--version" },
-            \\    }) catch |err| {
-            \\        std.log.err("tar executable not found: {}", .{err});
-            \\        return err;
-            \\    };
-            \\
-            \\    if (tar_check.term != .Exited or tar_check.term.Exited != 0) {
-            \\        std.log.err("tar command failed", .{});
-            \\        return error.TarNotAvailable;
-            \\    }
-            \\
-            \\    // Extract the bundle
-            \\
-            \\    const extract_result = std.process.Child.run(.{
-            \\        .allocator = allocator,
-            \\        .argv = &[_][]const u8{ "/bin/tar", "-xzf", bundle_file_path, "-C", temp_dir },
-            \\    }) catch |err| {
-            \\        std.log.err("Failed to run tar command: {} (Command: tar -xzf {s} -C {s})", .{ err, bundle_file_path, temp_dir });
-            \\        return err;
-            \\    };
-            \\
-            \\    if (extract_result.term.Exited != 0) {
-            \\        std.log.err("Bundle extraction failed with exit code: {}", .{extract_result.term.Exited});
-            \\        if (extract_result.stderr.len > 0) {
-            \\            std.log.err("Tar stderr: {s}", .{extract_result.stderr});
-            \\        }
-            \\        return error.ExtractionFailed;
-            \\    }
-            \\    defer allocator.free(extract_result.stdout);
-            \\    defer allocator.free(extract_result.stderr);
+            \\    // Extract the bundle using cross-platform extraction
+            \\    try extractTarGz(allocator, bundle_file_path, temp_dir, null);
             \\}
             \\
             \\fn setupPythonEnvironment(allocator: std.mem.Allocator, temp_dir: []const u8) !void {
             \\    // Extract Python runtime from the bundle
-            \\    const python_runtime_path = try std.fmt.allocPrint(allocator, "{s}/bundle/python_runtime.tar.gz", .{temp_dir});
+            \\    const python_runtime_path = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "python_runtime.tar.gz" });
             \\    defer allocator.free(python_runtime_path);
             \\
-            \\    const python_dir = try std.fmt.allocPrint(allocator, "{s}/python_runtime", .{temp_dir});
+            \\    const python_dir = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "python_runtime" });
             \\    defer allocator.free(python_dir);
             \\
             \\    // Create python runtime directory
@@ -432,38 +478,16 @@ pub const BundleGenerator = struct {
             \\        else => return err,
             \\    };
             \\
-            \\    // Extract Python runtime tar.gz
-            \\    const extract_result = std.process.Child.run(.{
-            \\        .allocator = allocator,
-            \\        .argv = &[_][]const u8{ "/bin/tar", "-xzf", python_runtime_path, "-C", python_dir, "--strip-components=1" },
-            \\    }) catch |err| {
-            \\        std.log.err("Failed to extract Python runtime: {}", .{err});
-            \\        return err;
-            \\    };
-            \\
-            \\    if (extract_result.term.Exited != 0) {
-            \\        std.log.err("Python runtime extraction failed with exit code: {}", .{extract_result.term.Exited});
-            \\        return error.PythonExtractionFailed;
-            \\    }
-            \\
-            \\    // Set up environment variables for the Python runtime
-            \\    const python_home = try std.fmt.allocPrint(allocator, "{s}", .{python_dir});
-            \\    defer allocator.free(python_home);
-            \\
-            \\    const assets_dir = try std.fmt.allocPrint(allocator, "{s}/bundle/assets", .{temp_dir});
-            \\    defer allocator.free(assets_dir);
-            \\
-            \\    // Note: For simplicity, we'll rely on Python's sys.path manipulation
-            \\    // rather than setting PYTHONHOME and PYTHONPATH environment variables
-            \\    // The variables are used in other functions
+            \\    // Extract Python runtime tar.gz using cross-platform extraction
+            \\    try extractTarGz(allocator, python_runtime_path, python_dir, 1);
             \\}
             \\
             \\fn installPackages(allocator: std.mem.Allocator, temp_dir: []const u8) !void {
             \\    std.log.info("Installing packages...", .{});
-            \\    const python_exe = try std.fmt.allocPrint(allocator, "{s}/python_runtime/3.14/bin/python3.14", .{temp_dir});
+            \\    const python_exe = try getPythonExePath(allocator, temp_dir);
             \\    defer allocator.free(python_exe);
             \\
-            \\    const assets_dir = try std.fmt.allocPrint(allocator, "{s}/bundle/assets", .{temp_dir});
+            \\    const assets_dir = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "assets" });
             \\    defer allocator.free(assets_dir);
             \\    // Installing packages from assets directory
             \\
@@ -478,7 +502,7 @@ pub const BundleGenerator = struct {
             \\        if (entry.kind != .file) continue;
             \\        // Install any file in assets directory
             \\
-            \\        const asset_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{assets_dir, entry.name});
+            \\        const asset_path = try std.fs.path.join(allocator, &[_][]const u8{ assets_dir, entry.name });
             \\        defer allocator.free(asset_path);
             \\
             \\        // Use the original wheel filename - it already has correct format
@@ -504,11 +528,11 @@ pub const BundleGenerator = struct {
             \\
             \\fn executeApplication(allocator: std.mem.Allocator, temp_dir: []const u8, args: []const []const u8) !void {
             \\    // Construct path to Python executable
-            \\    const python_exe = try std.fmt.allocPrint(allocator, "{s}/python_runtime/3.14/bin/python3.14", .{temp_dir});
+            \\    const python_exe = try getPythonExePath(allocator, temp_dir);
             \\    defer allocator.free(python_exe);
             \\
             \\    // Read metadata to determine how to execute the application
-            \\    const metadata_path = try std.fmt.allocPrint(allocator, "{s}/bundle/metadata.json", .{temp_dir});
+            \\    const metadata_path = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "metadata.json" });
             \\    defer allocator.free(metadata_path);
             \\
             \\    const metadata_file = std.fs.openFileAbsolute(metadata_path, .{}) catch |err| {
@@ -528,7 +552,7 @@ pub const BundleGenerator = struct {
             \\    defer allocator.free(package_name);
             \\
             \\    // Get assets directory for sys.path
-            \\    const assets_dir = try std.fmt.allocPrint(allocator, "{s}/bundle/assets", .{temp_dir});
+            \\    const assets_dir = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "assets" });
             \\    defer allocator.free(assets_dir);
             \\
             \\    // Build Python script to run the module as a command
