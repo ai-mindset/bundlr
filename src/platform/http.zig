@@ -127,7 +127,7 @@ pub const Client = struct {
                         callback(file_size, file_size);
                     }
 
-                    std.log.info("Downloaded {} bytes", .{file_size});
+                    // Download completed successfully
                 } else if (code == 22) {
                     // HTTP error codes
                     std.log.err("HTTP error downloading {s}", .{url});

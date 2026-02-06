@@ -30,4 +30,11 @@ pub const git = struct {
 pub const gui = struct {
     pub const dialogues = @import("gui/simple_dialogues.zig");
 };
+pub const build = struct {
+    pub const pipeline = @import("build/pipeline.zig");
+    pub const dependency_resolver = @import("build/dependency_resolver.zig");
+    pub const asset_collector = @import("build/asset_collector.zig");
+    pub const runtime_embedder = @import("build/runtime_embedder.zig");
+    pub const bundle_generator = @import("build/bundle_generator.zig");
+};
 

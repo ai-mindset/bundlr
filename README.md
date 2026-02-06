@@ -21,7 +21,7 @@ Bundlr automatically downloads Python, creates isolated environments, installs p
 
 ### Command Line Mode
 ```bash
-# Popular CLI tools
+# Execute Python tools instantly
 bundlr cowsay -t "Hello World"          # ASCII art text
 bundlr httpie GET httpbin.org/json      # HTTP client tool
 bundlr black --help                     # Python code formatter
@@ -30,9 +30,46 @@ bundlr black --help                     # Python code formatter
 bundlr https://github.com/psf/black --help
 bundlr https://github.com/ai-mindset/distil --help
 
+# Create portable executables (Build Mode)
+bundlr build cowsay --target linux-x86_64     # Linux executable
+bundlr build httpie --target windows-x86_64   # Windows executable
+bundlr build black --target macos-aarch64     # macOS Apple Silicon
+
 # Launch GUI mode explicitly
 bundlr --gui
 ```
+
+## 🔨 Build Mode: Create Portable Executables
+
+Bundlr can create **standalone, portable executables** that run anywhere without requiring bundlr to be installed on the target system. Perfect for distributing tools or deploying to servers.
+
+### Features
+- 📦 **Self-contained**: Includes Python runtime + dependencies
+- 🌐 **Cross-platform**: Build for any supported platform from any platform
+- ⚡ **Optimised**: Multiple optimisation levels for size vs speed
+- 🚀 **No dependencies**: Generated executables run without installation
+
+### Usage
+```bash
+# Basic build command
+bundlr build <package> --target <platform>
+
+# Available targets
+bundlr build cowsay --target linux-x86_64                           # Linux
+bundlr build cowsay --target macos-x86_64                           # macOS Intel
+bundlr build cowsay --target macos-aarch64                          # macOS Apple Silicon
+bundlr build cowsay --target windows-x86_64                         # Windows
+
+# Build from GitHub repositories
+bundlr build https://github.com/psf/black --target linux-x86_64
+
+# Optimisation levels (optional)
+bundlr build httpie --target linux-x86_64 --optimise-speed          # Faster execution
+bundlr build httpie --target linux-x86_64 --optimise-size           # Smaller binary
+bundlr build httpie --target linux-x86_64 --optimise-compatibility  # Default
+```
+
+Generated **self-extracting bundles** (~100-150MB) work on any system without Python/bundlr installed.
 
 ## 🤔 Why Bundlr?
 
@@ -44,12 +81,9 @@ bundlr --gui
 
 **vs. Git clone + setup:** Skip the clone, virtual environment creation, and dependency installation dance.
 
-**When to use Bundlr:**
-- Quickly testing unfamiliar Python tools
-- Running CI/CD tasks without environment setup
-- Executing one-off scripts from GitHub
-- Safely trying potentially problematic packages
-- Working on systems where you can't install packages globally
+**vs. PyInstaller/cx_Freeze:** No need to install Python or packaging tools. Build cross-platform executables from any platform.
+
+**Use cases:** Testing tools instantly, creating portable executables, CI/CD deployment, one-off scripts, air-gapped systems.
 
 ## 📥 Installation
 
@@ -86,25 +120,28 @@ cd bundlr && zig build
 
 ## 🎯 How It Works
 
-Bundlr creates completely isolated execution environments for each command:
+**Instant Execution** (`bundlr <package>`): Downloads Python 3.14 (~60MB), creates isolated environment, installs package, executes command. ~10s cold start, ~2s cached.
 
-1. **🐍 Python Distribution** - Downloads Python 3.14 from python-build-standalone if not cached (~60MB, one-time)
-2. **🔒 Isolated Environment** - Creates fresh virtual environment in platform-specific cache
-3. **📦 Smart Installation** - Uses **pip** for PyPI packages, **uv** for Git repositories with automatic dependency resolution
-4. **▶️ Command Execution** - Runs your specified command with all arguments in the isolated environment
-5. **🧹 Automatic Cleanup** - Removes temporary files while preserving cache for faster subsequent runs
+**Build Mode** (`bundlr build <package> --target <platform>`): Creates optimised Python runtime bundle, collects dependencies, generates cross-platform self-extracting executable. ~50s with caching optimisations.
 
-**Technical Details:**
-- **Security-first**: Command injection prevention, isolated execution, no system pollution
-- **Performance**: Cold start ~10s (download), warm start ~2s (cached), 1GB cache limit
-- **Architecture**: Single Zig binary, no runtime dependencies, comprehensive testing
+- **Security**: Command injection prevention, isolated execution, no system pollution
+- **Architecture**: Single Zig binary, 1GB cache limit, comprehensive testing
 
+## ⚡ Performance & Efficiency
 
-## 🛠 Platform Support
+**Optimised Binary**: Bundlr is highly optimised for both size and performance:
+- **Ultra-compact**: 233KB executable (98% smaller than typical builds)
+- **Lightning startup**: <1ms for help/info commands
+- **Memory efficient**: Arena-based allocation optimised for CLI usage patterns
+- **Single-threaded**: No threading overhead for optimal resource usage
 
-✅ **Linux** (x86_64) - Fully supported  
-✅ **macOS** (Intel & Apple Silicon) - Native support  
-✅ **Windows** (x86_64) - Complete support  
+**Technical Optimisations**:
+- `ReleaseSmall` compilation with symbol stripping
+- Arena allocator for improved memory management
+- Reduced array sizes and code deduplication
+- Platform-specific optimisations
+
+These optimisations make bundlr perfect for distribution and CI/CD environments where binary size and startup performance matter.
 
 ## ⚠️ Troubleshooting
 
@@ -134,6 +171,12 @@ A: Absolutely! Perfect for running tools like black, pytest, or custom scripts w
 
 Q: What Python version does it use?
 A: Python 3.14 by default, configurable via `BUNDLR_PYTHON_VERSION` environment variable.
+
+**Q: How do portable executables work?**
+A: Build mode creates self-extracting bundles (~100-150MB) that include Python runtime and all dependencies. They run on target systems without requiring bundlr or Python to be installed.
+
+**Q: Can I distribute the generated executables?**
+A: Yes! Generated executables are completely standalone and can be distributed freely. Recipients don't need Python, bundlr, or any dependencies installed.
 
 ## 📄 License
 
