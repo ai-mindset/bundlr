@@ -617,16 +617,54 @@ pub const RuntimeEmbedder = struct {
 
     /// Copy directory contents recursively (not the directory itself)
     fn copyDirectory(self: *RuntimeEmbedder, src: []const u8, dest: []const u8) !void {
-        // Use cp -rT to copy contents INTO dest, not as a subdirectory of dest
-        const cp_args = [_][]const u8{ "cp", "-rT", src, dest };
-        const result = try bundlr.platform.process.run(
-            self.allocator,
-            &cp_args,
-            "."
-        );
+        // Cross-platform directory copying using Zig std.fs APIs
+        try self.copyDirectoryRecursive(src, dest);
+    }
 
-        if (result != 0) {
-            return error.DirectoryCopyFailed;
+    /// Recursively copy directory contents using Zig std.fs
+    fn copyDirectoryRecursive(self: *RuntimeEmbedder, src: []const u8, dest: []const u8) !void {
+        var src_dir = std.fs.openDirAbsolute(src, .{ .iterate = true }) catch |err| {
+            std.log.err("Failed to open source directory {s}: {}", .{ src, err });
+            return err;
+        };
+        defer src_dir.close();
+
+        // Ensure destination directory exists
+        std.fs.makeDirAbsolute(dest) catch |err| switch (err) {
+            error.PathAlreadyExists => {}, // OK if it already exists
+            else => return err,
+        };
+
+        // Iterate through source directory
+        var iterator = src_dir.iterate();
+        while (try iterator.next()) |entry| {
+            const src_path = try std.fs.path.join(self.allocator, &[_][]const u8{ src, entry.name });
+            defer self.allocator.free(src_path);
+
+            const dest_path = try std.fs.path.join(self.allocator, &[_][]const u8{ dest, entry.name });
+            defer self.allocator.free(dest_path);
+
+            switch (entry.kind) {
+                .file => {
+                    try self.copyFile(src_path, dest_path);
+                },
+                .directory => {
+                    try std.fs.makeDirAbsolute(dest_path);
+                    try self.copyDirectoryRecursive(src_path, dest_path);
+                },
+                .sym_link => {
+                    // Handle symlinks by reading the target and creating a new symlink
+                    var link_target_buffer: [4096]u8 = undefined;
+                    const link_target = try std.fs.readLinkAbsolute(src_path, &link_target_buffer);
+                    std.fs.symLinkAbsolute(link_target, dest_path, .{}) catch |err| {
+                        std.log.warn("Failed to create symlink {s} -> {s}: {}", .{ dest_path, link_target, err });
+                    };
+                },
+                else => {
+                    // Skip other types (block devices, character devices, etc.)
+                    std.log.warn("Skipping unsupported file type: {s} ({})", .{ src_path, entry.kind });
+                },
+            }
         }
     }
 
