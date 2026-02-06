@@ -727,10 +727,26 @@ pub const BundleGenerator = struct {
     fn createLauncherScript(self: *BundleGenerator, bundle_dir: []const u8, options: BundleOptions) ![]u8 {
         const launcher_path = try std.fs.path.join(self.allocator, &[_][]const u8{ bundle_dir, "launcher.sh" });
 
-        const exec_command = if (options.entry_point) |ep|
-            try std.fmt.allocPrint(self.allocator, "\"$PYTHON_RUNTIME/bin/python\" -c \"{s}\" \"$@\"", .{ep})
-        else
-            try std.fmt.allocPrint(self.allocator, "\"$PYTHON_RUNTIME/bin/python\" -m {s} \"$@\"", .{options.dependencies.root_package});
+        const exec_command = if (options.entry_point) |ep| blk: {
+            // Safely escape single quotes for use inside a single-quoted shell string
+            const escaped_ep = try std.mem.replaceOwned(u8, self.allocator, ep, "'", "'\"'\"'");
+            defer self.allocator.free(escaped_ep);
+            break :blk try std.fmt.allocPrint(
+                self.allocator,
+                "\"$PYTHON_RUNTIME/bin/python\" -c '{s}' \"$@\"",
+                .{escaped_ep},
+            );
+        } else blk: {
+            const root = options.dependencies.root_package;
+            // Safely escape single quotes for use inside a single-quoted shell string
+            const escaped_root = try std.mem.replaceOwned(u8, self.allocator, root, "'", "'\"'\"'");
+            defer self.allocator.free(escaped_root);
+            break :blk try std.fmt.allocPrint(
+                self.allocator,
+                "\"$PYTHON_RUNTIME/bin/python\" -m '{s}' \"$@\"",
+                .{escaped_root},
+            );
+        };
         defer self.allocator.free(exec_command);
 
         const launcher_content = try std.fmt.allocPrint(self.allocator,
