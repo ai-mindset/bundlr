@@ -371,10 +371,99 @@ pub const BundleGenerator = struct {
             \\
             \\fn getPythonExePath(allocator: std.mem.Allocator, temp_dir: []const u8) ![]u8 {
             \\    const builtin = @import("builtin");
+            \\
+            \\    // Read Python version from metadata to construct correct path
+            \\    const metadata_path = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "metadata.json" });
+            \\    defer allocator.free(metadata_path);
+            \\
+            \\    const python_version = extractPythonVersionFromMetadata(allocator, metadata_path) catch blk: {
+            \\        std.log.warn("Could not read Python version from metadata, attempting runtime discovery", .{});
+            \\        break :blk try discoverPythonExecutable(allocator, temp_dir);
+            \\    };
+            \\    defer allocator.free(python_version);
+            \\
             \\    return switch (builtin.os.tag) {
             \\        .windows => try std.fmt.allocPrint(allocator, "{s}\\\\python_runtime\\\\python.exe", .{temp_dir}),
-            \\        else => try std.fmt.allocPrint(allocator, "{s}/python_runtime/bin/python3", .{temp_dir}),
+            \\        else => try std.fmt.allocPrint(allocator, "{s}/python_runtime/bin/python{s}", .{ temp_dir, python_version }),
             \\    };
+            \\}
+            \\
+            \\fn extractPythonVersionFromMetadata(allocator: std.mem.Allocator, metadata_path: []const u8) ![]u8 {
+            \\    const metadata_file = try std.fs.openFileAbsolute(metadata_path, .{});
+            \\    defer metadata_file.close();
+            \\
+            \\    const metadata_content = try metadata_file.readToEndAlloc(allocator, 1024 * 1024);
+            \\    defer allocator.free(metadata_content);
+            \\
+            \\    // Look for "python_version": "value"
+            \\    const needle = "\"python_version\":";
+            \\    const start_pos = std.mem.indexOf(u8, metadata_content, needle) orelse return error.PythonVersionNotFound;
+            \\
+            \\    var pos = start_pos + needle.len;
+            \\
+            \\    // Skip whitespace and find opening quote
+            \\    while (pos < metadata_content.len and (metadata_content[pos] == ' ' or metadata_content[pos] == '\t' or metadata_content[pos] == '\n')) {
+            \\        pos += 1;
+            \\    }
+            \\
+            \\    if (pos >= metadata_content.len or metadata_content[pos] != '"') {
+            \\        return error.InvalidJsonFormat;
+            \\    }
+            \\
+            \\    pos += 1; // Skip opening quote
+            \\    const value_start = pos;
+            \\
+            \\    // Find closing quote
+            \\    while (pos < metadata_content.len and metadata_content[pos] != '"') {
+            \\        pos += 1;
+            \\    }
+            \\
+            \\    if (pos >= metadata_content.len) {
+            \\        return error.InvalidJsonFormat;
+            \\    }
+            \\
+            \\    const value_end = pos;
+            \\    return try allocator.dupe(u8, metadata_content[value_start..value_end]);
+            \\}
+            \\
+            \\fn discoverPythonExecutable(allocator: std.mem.Allocator, temp_dir: []const u8) ![]u8 {
+            \\    const builtin = @import("builtin");
+            \\
+            \\    switch (builtin.os.tag) {
+            \\        .windows => {
+            \\            // On Windows, python.exe should be at the root of the runtime
+            \\            return try allocator.dupe(u8, "");
+            \\        },
+            \\        else => {
+            \\            // On Unix, scan the bin directory for python executables
+            \\            const bin_dir_path = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "python_runtime", "bin" });
+            \\            defer allocator.free(bin_dir_path);
+            \\
+            \\            var bin_dir = std.fs.openDirAbsolute(bin_dir_path, .{ .iterate = true }) catch {
+            \\                // Fallback to generic python3 if bin dir doesn't exist
+            \\                return try allocator.dupe(u8, "3");
+            \\            };
+            \\            defer bin_dir.close();
+            \\
+            \\            var iterator = bin_dir.iterate();
+            \\            while (try iterator.next()) |entry| {
+            \\                if (entry.kind != .file) continue;
+            \\
+            \\                // Look for python3.X executables
+            \\                if (std.mem.startsWith(u8, entry.name, "python3.") and entry.name.len > 8) {
+            \\                    const version_part = entry.name[6..]; // Skip "python" to get "3.X"
+            \\                    return try allocator.dupe(u8, version_part);
+            \\                }
+            \\                // Look for python3 (without version)
+            \\                if (std.mem.eql(u8, entry.name, "python3")) {
+            \\                    return try allocator.dupe(u8, "3");
+            \\                }
+            \\            }
+            \\
+            \\            // Fallback to generic python3
+            \\            return try allocator.dupe(u8, "3");
+            \\        },
+            \\    }
             \\}
             \\
             \\fn extractBundle(allocator: std.mem.Allocator, temp_dir: []const u8) !void {
