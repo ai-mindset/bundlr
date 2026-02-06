@@ -783,7 +783,7 @@ pub const BundleGenerator = struct {
             \\
             \\# Extract Python runtime if needed
             \\if [ ! -d "$PYTHON_RUNTIME" ]; then
-            \\    /bin/tar -xzf "$BUNDLE_DIR/python_runtime.tar.gz" -C "$BUNDLE_DIR"
+            \\    tar -xzf "$BUNDLE_DIR/python_runtime.tar.gz" -C "$BUNDLE_DIR"
             \\fi
             \\
             \\# Set up Python environment
