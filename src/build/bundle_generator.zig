@@ -722,8 +722,8 @@ pub const BundleGenerator = struct {
 
         // Build zig compile command for cross-compilation
         const target_string = switch (target) {
-            .linux_x86_64 => "x86_64-linux-gnu",
-            .linux_aarch64 => "aarch64-linux-gnu",
+            .linux_x86_64 => "x86_64-linux",
+            .linux_aarch64 => "aarch64-linux",
             .windows_x86_64 => "x86_64-windows-gnu",
             .windows_aarch64 => "aarch64-windows-gnu",
             .macos_x86_64 => "x86_64-macos",
@@ -1107,4 +1107,3 @@ test "component sizes calculation" {
 
     try std.testing.expect(sizes.total_size == 0); // Files don't exist, so size is 0
 }
-

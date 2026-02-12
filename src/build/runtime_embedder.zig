@@ -449,7 +449,7 @@ pub const RuntimeEmbedder = struct {
         const tar_args = [_][]const u8{
             "tar",
             "-C",
-            std.fs.path.dirname(source_dir).?,
+            std.fs.path.dirname(source_dir) orelse ".",
             "-czf",
             archive_path,
             std.fs.path.basename(source_dir),
