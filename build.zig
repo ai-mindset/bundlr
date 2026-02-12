@@ -74,7 +74,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .single_threaded = true,
-            .strip = true,
+            .strip = false,
             .imports = &.{
                 .{ .name = "bundlr", .module = mod },
                 .{ .name = "build_options", .module = build_options.createModule() },

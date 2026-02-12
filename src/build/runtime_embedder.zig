@@ -244,9 +244,10 @@ pub const RuntimeEmbedder = struct {
         // On Windows, python.exe is at root of install dir (no bin/ subdirectory)
         // On Unix, python3 is in bin/, so we need parent of bin/
         const python_dir = std.fs.path.dirname(python_exe) orelse return error.InvalidPythonPath;
+
         const base_dir = switch (config.target_platform) {
             .windows_x86_64, .windows_aarch64 => python_dir,
-            else => std.fs.path.dirname(python_dir) orelse return error.InvalidPythonPath,
+            else => std.fs.path.dirname(python_dir) orelse python_dir,
         };
 
         return try self.allocator.dupe(u8, base_dir);
@@ -568,19 +569,18 @@ pub const RuntimeEmbedder = struct {
 
     /// Recursively copy directory contents using Zig std.fs
     fn copyDirectoryRecursive(self: *RuntimeEmbedder, src: []const u8, dest: []const u8) !void {
+        std.debug.print("copyDirectoryRecursive: {s} -> {s}", .{ src, dest });
         var src_dir = std.fs.openDirAbsolute(src, .{ .iterate = true }) catch |err| {
             std.log.err("Failed to open source directory {s}: {}", .{ src, err });
             return err;
         };
         defer src_dir.close();
 
-        // Ensure destination directory exists
         std.fs.makeDirAbsolute(dest) catch |err| switch (err) {
-            error.PathAlreadyExists => {}, // OK if it already exists
+            error.PathAlreadyExists => {},
             else => return err,
         };
 
-        // Iterate through source directory
         var iterator = src_dir.iterate();
         while (try iterator.next()) |entry| {
             const src_path = try std.fs.path.join(self.allocator, &[_][]const u8{ src, entry.name });
@@ -589,26 +589,31 @@ pub const RuntimeEmbedder = struct {
             const dest_path = try std.fs.path.join(self.allocator, &[_][]const u8{ dest, entry.name });
             defer self.allocator.free(dest_path);
 
-            switch (entry.kind) {
-                .file => {
-                    try self.copyFile(src_path, dest_path);
-                },
+            const kind = if (entry.kind == .unknown) blk: {
+                const stat = src_dir.statFile(entry.name) catch |err| {
+                    std.log.warn("Failed to stat {s}: {}", .{ entry.name, err });
+                    break :blk entry.kind;
+                };
+                break :blk stat.kind;
+            } else entry.kind;
+
+            std.debug.print("Processing {s} (kind: {})", .{ src_path, kind });
+
+            switch (kind) {
+                .file => try self.copyFile(src_path, dest_path),
                 .directory => {
                     try std.fs.makeDirAbsolute(dest_path);
                     try self.copyDirectoryRecursive(src_path, dest_path);
                 },
                 .sym_link => {
-                    // Handle symlinks by reading the target and creating a new symlink
                     var link_target_buffer: [4096]u8 = undefined;
                     const link_target = try std.fs.readLinkAbsolute(src_path, &link_target_buffer);
                     std.fs.symLinkAbsolute(link_target, dest_path, .{}) catch |err| {
                         std.log.warn("Failed to create symlink {s} -> {s}: {}", .{ dest_path, link_target, err });
                     };
                 },
-                else => {
-                    // Skip other types (block devices, character devices, etc.)
-                    std.log.warn("Skipping unsupported file type: {s} ({})", .{ src_path, entry.kind });
-                },
+                .unknown => std.log.warn("Skipping file with unknown type: {s}", .{ src_path }),
+                else => std.log.warn("Skipping unsupported file type: {s} ({})", .{ src_path, kind }),
             }
         }
     }
