@@ -427,11 +427,10 @@ pub const DependencyResolver = struct {
 /// Check if package specification is a Git repository
 pub fn isGitRepository(package: []const u8) bool {
     return std.mem.startsWith(u8, package, "http://") or
-        return std.mem.startsWith(u8, package, "http://") or
-            std.mem.startsWith(u8, package, "https://") or
-            std.mem.startsWith(u8, package, "git@") or
-            std.mem.indexOf(u8, package, "github.com") != null or
-            std.mem.indexOf(u8, package, "gitlab.com") != null;
+        std.mem.startsWith(u8, package, "https://") or
+        std.mem.startsWith(u8, package, "git@") or
+        std.mem.indexOf(u8, package, "github.com") != null or
+        std.mem.indexOf(u8, package, "gitlab.com") != null;
 }
 
 /// Extract package name from Git URL
@@ -469,4 +468,3 @@ test "package line parsing" {
     try std.testing.expectEqualStrings("6.1", package_info.version);
     try std.testing.expectEqualStrings("sha256:abc123def456", package_info.wheel_hash.?);
 }
-

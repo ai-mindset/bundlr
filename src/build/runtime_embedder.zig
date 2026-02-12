@@ -123,18 +123,9 @@ pub const RuntimeEmbedder = struct {
     }
 
     /// Check if a cached runtime bundle exists and return it if valid
-    fn getCachedRuntimeBundle(
-        self: *RuntimeEmbedder,
-        python_version: []const u8,
-        target: pipeline.TargetPlatform,
-        optimize_level: pipeline.OptimizeLevel
-    ) !?RuntimeBundle {
+    fn getCachedRuntimeBundle(self: *RuntimeEmbedder, python_version: []const u8, target: pipeline.TargetPlatform, optimize_level: pipeline.OptimizeLevel) !?RuntimeBundle {
         // Create cache key based on version, target, and optimisation level
-        const cache_key = try std.fmt.allocPrint(
-            self.allocator,
-            "runtime_{s}_{s}_{s}.tar.gz",
-            .{ python_version, target.toString(), @tagName(optimize_level) }
-        );
+        const cache_key = try std.fmt.allocPrint(self.allocator, "runtime_{s}_{s}_{s}.tar.gz", .{ python_version, target.toString(), @tagName(optimize_level) });
         defer self.allocator.free(cache_key);
 
         const cache_path = try std.fmt.allocPrint(self.allocator, "/tmp/{s}", .{cache_key});
@@ -173,12 +164,7 @@ pub const RuntimeEmbedder = struct {
     }
 
     /// Create an optimised runtime bundle for the target platform
-    pub fn createRuntimeBundle(
-        self: *RuntimeEmbedder,
-        python_version: []const u8,
-        target: pipeline.TargetPlatform,
-        optimize_level: pipeline.OptimizeLevel
-    ) !RuntimeBundle {
+    pub fn createRuntimeBundle(self: *RuntimeEmbedder, python_version: []const u8, target: pipeline.TargetPlatform, optimize_level: pipeline.OptimizeLevel) !RuntimeBundle {
         std.debug.print("🐍 Creating Python {s} runtime bundle for {s}...\n", .{ python_version, target.toString() });
 
         // Check if optimised runtime already exists in cache
@@ -306,12 +292,7 @@ pub const RuntimeEmbedder = struct {
     }
 
     /// Optimize the Python runtime by removing unnecessary components
-    fn optimizeRuntime(
-        self: *RuntimeEmbedder,
-        base_runtime: []const u8,
-        work_dir: []const u8,
-        config: RuntimeConfig
-    ) ![]u8 {
+    fn optimizeRuntime(self: *RuntimeEmbedder, base_runtime: []const u8, work_dir: []const u8, config: RuntimeConfig) ![]u8 {
         std.debug.print("  🔧 Optimizing runtime...\n", .{});
 
         // Create optimized runtime directory
@@ -341,14 +322,14 @@ pub const RuntimeEmbedder = struct {
 
         // Remove unnecessary files
         const cleanup_patterns = [_][]const u8{
-            "*.pyc",        // Remove compiled bytecode (we'll recompile)
-            "__pycache__",  // Remove cache directories
-            "test",         // Remove test modules
-            "tests",        // Remove test directories
-            "*.exe",        // Remove Windows executables on non-Windows
-            "*.pdb",        // Remove debug symbols
-            "*.a",          // Remove static libraries
-            "include",      // Remove header files
+            "*.pyc", // Remove compiled bytecode (we'll recompile)
+            "__pycache__", // Remove cache directories
+            "test", // Remove test modules
+            "tests", // Remove test directories
+            "*.exe", // Remove Windows executables on non-Windows
+            "*.pdb", // Remove debug symbols
+            "*.a", // Remove static libraries
+            "include", // Remove header files
         };
 
         for (cleanup_patterns) |pattern| {
@@ -391,32 +372,20 @@ pub const RuntimeEmbedder = struct {
     }
 
     /// Create compressed runtime archive
-    fn createRuntimeArchive(
-        self: *RuntimeEmbedder,
-        runtime_dir: []const u8,
-        config: RuntimeConfig
-    ) ![]u8 {
+    fn createRuntimeArchive(self: *RuntimeEmbedder, runtime_dir: []const u8, config: RuntimeConfig) ![]u8 {
         std.debug.print("  📦 Creating runtime archive...\n", .{});
 
         // Create archive in /tmp directory with predictable cache name
-        const archive_name = try std.fmt.allocPrint(
-            self.allocator,
-            "runtime_{s}_{s}_{s}.tar.gz",
-            .{ config.python_version, config.target_platform.toString(), @tagName(config.optimize_level) }
-        );
+        const archive_name = try std.fmt.allocPrint(self.allocator, "runtime_{s}_{s}_{s}.tar.gz", .{ config.python_version, config.target_platform.toString(), @tagName(config.optimize_level) });
         defer self.allocator.free(archive_name);
 
-        const archive_path = try std.fmt.allocPrint(
-            self.allocator,
-            "/tmp/{s}",
-            .{archive_name}
-        );
+        const archive_path = try std.fmt.allocPrint(self.allocator, "/tmp/{s}", .{archive_name});
 
         std.debug.print("  🔧 Creating archive: {s}\n", .{archive_path});
         std.debug.print("  📂 Source directory: {s}\n", .{runtime_dir});
 
         // Use platform-specific archive creation
-        try self.createArchiveWithSystemTools(runtime_dir, archive_path);
+        try self.createArchiveWithSystemTools(runtime_dir, archive_path, config.target_platform);
 
         // Verify the file was created
         const file = std.fs.openFileAbsolute(archive_path, .{}) catch |err| {
@@ -430,21 +399,12 @@ pub const RuntimeEmbedder = struct {
     }
 
     /// Create archive using platform-appropriate tools
-    fn createArchiveWithSystemTools(
-        self: *RuntimeEmbedder,
-        source_dir: []const u8,
-        archive_path: []const u8
-    ) !void {
-        const builtin = @import("builtin");
-
-        switch (builtin.os.tag) {
-            .windows => {
+    fn createArchiveWithSystemTools(self: *RuntimeEmbedder, source_dir: []const u8, archive_path: []const u8, target: pipeline.TargetPlatform) !void {
+        switch (target) {
+            .windows_x86_64, .windows_aarch64 => {
                 // On Windows, use PowerShell Compress-Archive (creates .zip, not .tar.gz)
                 // For compatibility, we'll create a .zip file instead when tar is unavailable
-                const zip_path = try std.fmt.allocPrint(
-                    self.allocator,
-                    "{s}.zip",
-                    .{archive_path[0..archive_path.len - 7]} // Remove .tar.gz extension
+                const zip_path = try std.fmt.allocPrint(self.allocator, "{s}.zip", .{archive_path[0 .. archive_path.len - 7]} // Remove .tar.gz extension
                 );
                 defer self.allocator.free(zip_path);
 
@@ -458,17 +418,14 @@ pub const RuntimeEmbedder = struct {
                 const args = [_][]const u8{
                     "powershell",
                     "-NoProfile",
-                    "-ExecutionPolicy", "Bypass",
+                    "-ExecutionPolicy",
+                    "Bypass",
                     "-Command",
                     command,
                 };
 
                 std.debug.print("  💻 Using PowerShell to create archive on Windows...\n", .{});
-                const result = try bundlr.platform.process.run(
-                    self.allocator,
-                    &args,
-                    "."
-                );
+                const result = try bundlr.platform.process.run(self.allocator, &args, ".");
 
                 if (result != 0) {
                     // Fallback: try using tar on Windows 10+ (if available)
@@ -488,11 +445,7 @@ pub const RuntimeEmbedder = struct {
     }
 
     /// Create archive using tar command (Unix/Linux/macOS or Windows 10+)
-    fn createArchiveWithTar(
-        self: *RuntimeEmbedder,
-        source_dir: []const u8,
-        archive_path: []const u8
-    ) !void {
+    fn createArchiveWithTar(self: *RuntimeEmbedder, source_dir: []const u8, archive_path: []const u8) !void {
         const tar_args = [_][]const u8{
             "tar",
             "-C",
@@ -503,11 +456,7 @@ pub const RuntimeEmbedder = struct {
         };
 
         std.debug.print("  💻 Running tar command...\n", .{});
-        const result = bundlr.platform.process.run(
-            self.allocator,
-            &tar_args,
-            "."
-        ) catch |err| {
+        const result = bundlr.platform.process.run(self.allocator, &tar_args, ".") catch |err| {
             if (err == error.FileNotFound) {
                 std.debug.print("  ❌ tar executable not found\n", .{});
                 return error.TarNotAvailable;
@@ -541,18 +490,14 @@ pub const RuntimeEmbedder = struct {
     }
 
     /// Generate runtime metadata
-    fn createRuntimeMetadata(
-        self: *RuntimeEmbedder,
-        original_runtime: []const u8,
-        bundle_path: []const u8,
-        config: RuntimeConfig
-    ) !RuntimeMetadata {
+    fn createRuntimeMetadata(self: *RuntimeEmbedder, original_runtime: []const u8, bundle_path: []const u8, config: RuntimeConfig) !RuntimeMetadata {
         const original_size = try self.getDirectorySize(original_runtime);
         const optimized_size = try self.getFileSize(bundle_path);
 
         const compression_ratio = if (original_size > 0)
             (1.0 - (@as(f32, @floatFromInt(optimized_size)) / @as(f32, @floatFromInt(original_size)))) * 100.0
-        else 0.0;
+        else
+            0.0;
 
         // Get included modules list
         const included_modules = try self.getIncludedModules(config);
@@ -574,21 +519,21 @@ pub const RuntimeEmbedder = struct {
     fn getExcludedModules(self: *RuntimeEmbedder, optimize_level: pipeline.OptimizeLevel) ![][]const u8 {
         // Common exclusions for all optimization levels
         const common_exclusions = [_][]const u8{
-            "tkinter",      // GUI framework (rarely needed in CLI apps)
-            "turtle",       // Graphics library
-            "idlelib",      // IDLE development environment
-            "lib2to3",      // Python 2to3 tool
-            "test",         // Test suite
-            "tests",        // Additional tests
+            "tkinter", // GUI framework (rarely needed in CLI apps)
+            "turtle", // Graphics library
+            "idlelib", // IDLE development environment
+            "lib2to3", // Python 2to3 tool
+            "test", // Test suite
+            "tests", // Additional tests
         };
 
         // Additional exclusions for size optimization
         const size_exclusions = [_][]const u8{
-            "pydoc",        // Documentation tool
-            "doctest",      // Testing framework
-            "unittest",     // Unit testing
-            "distutils",    // Distribution utilities
-            "email",        // Email handling (if not needed)
+            "pydoc", // Documentation tool
+            "doctest", // Testing framework
+            "unittest", // Unit testing
+            "distutils", // Distribution utilities
+            "email", // Email handling (if not needed)
         };
 
         // Determine total count
