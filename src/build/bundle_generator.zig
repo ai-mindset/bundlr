@@ -152,23 +152,14 @@ pub const BundleGenerator = struct {
 
         // Step 4: Assemble final executable
         std.debug.print("  🔨 Assembling final executable...\n", .{});
-        const final_executable = try self.assembleFinalExecutable(
-            stub_path,
-            bundle_components,
-            metadata,
-            options.output_path
-        );
+        const final_executable = try self.assembleFinalExecutable(stub_path, bundle_components, metadata, options.output_path);
         defer self.allocator.free(final_executable);
 
         // Step 5: Set executable permissions
         try self.setExecutablePermissions(final_executable);
 
         // Step 6: Calculate component sizes
-        const component_sizes = try self.calculateComponentSizes(
-            stub_path,
-            bundle_components,
-            final_executable
-        );
+        const component_sizes = try self.calculateComponentSizes(stub_path, bundle_components, final_executable);
 
         std.debug.print("✅ Bundle generated: {s} ({} MB)\n", .{
             final_executable,
@@ -228,6 +219,7 @@ pub const BundleGenerator = struct {
             \\//! This is the entry point for a bundled Python application
             \\
             \\const std = @import("std");
+            \\const builtin = @import("builtin");
             \\
             \\// Embedded bundle data (will be appended during bundle generation)
             \\extern const bundle_data: [*]const u8;
@@ -278,7 +270,6 @@ pub const BundleGenerator = struct {
             \\}}
             \\
             \\fn getSystemTempDir(allocator: std.mem.Allocator) ![]u8 {
-            \\    const builtin = @import("builtin");
             \\    switch (builtin.os.tag) {
             \\        .windows => {
             \\            return std.process.getEnvVarOwned(allocator, "TMP") catch
@@ -301,7 +292,6 @@ pub const BundleGenerator = struct {
             \\}
             \\
             \\fn extractTarGz(allocator: std.mem.Allocator, archive_path: []const u8, target_dir: []const u8, strip_components: ?u32) !void {
-            \\    const builtin = @import("builtin");
             \\    switch (builtin.os.tag) {
             \\        .windows => {
             \\            // Two-stage: decompress gzip with PowerShell, then extract tar
@@ -370,8 +360,6 @@ pub const BundleGenerator = struct {
             \\}
             \\
             \\fn getPythonExePath(allocator: std.mem.Allocator, temp_dir: []const u8) ![]u8 {
-            \\    const builtin = @import("builtin");
-            \\
             \\    // Read Python version from metadata to construct correct path
             \\    const metadata_path = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "metadata.json" });
             \\    defer allocator.free(metadata_path);
@@ -427,7 +415,6 @@ pub const BundleGenerator = struct {
             \\}
             \\
             \\fn discoverPythonExecutable(allocator: std.mem.Allocator, temp_dir: []const u8) ![]u8 {
-            \\    const builtin = @import("builtin");
             \\
             \\    switch (builtin.os.tag) {
             \\        .windows => {
@@ -573,46 +560,40 @@ pub const BundleGenerator = struct {
             \\
             \\fn installPackages(allocator: std.mem.Allocator, temp_dir: []const u8) !void {
             \\    std.log.info("Installing packages...", .{});
-            \\    const python_exe = try getPythonExePath(allocator, temp_dir);
+            \\    const python_exe = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "python_runtime", if (builtin.os.tag == .windows) "python.exe" else "bin/python" });
             \\    defer allocator.free(python_exe);
             \\
-            \\    const assets_dir = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "assets" });
-            \\    defer allocator.free(assets_dir);
-            \\    // Installing packages from assets directory
+            \\    // Check for source_url in metadata (Git repos)
+            \\    const metadata_path = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "metadata.json" });
+            \\    defer allocator.free(metadata_path);
+            \\    const metadata_content = std.fs.cwd().readFileAlloc(allocator, metadata_path, 1024 * 1024) catch "";
+            \\    defer if (metadata_content.len > 0) allocator.free(metadata_content);
             \\
-            \\    var dir = std.fs.openDirAbsolute(assets_dir, .{ .iterate = true }) catch |err| {
-            \\        std.log.err("Failed to open assets directory: {}", .{err});
-            \\        return err;
-            \\    };
-            \\    defer dir.close();
-            \\
-            \\    var iterator = dir.iterate();
-            \\    while (try iterator.next()) |entry| {
-            \\        if (entry.kind != .file) continue;
-            \\        // Install any file in assets directory
-            \\
-            \\        const asset_path = try std.fs.path.join(allocator, &[_][]const u8{ assets_dir, entry.name });
-            \\        defer allocator.free(asset_path);
-            \\
-            \\        // Use the original wheel filename - it already has correct format
-            \\        const install_path = asset_path;
-            \\
-            \\        const install_result = std.process.Child.run(.{
-            \\            .allocator = allocator,
-            \\            .argv = &[_][]const u8{ python_exe, "-m", "pip", "install", install_path },
-            \\        }) catch |err| {
-            \\            std.log.err("Failed to install {s}: {}", .{entry.name, err});
-            \\            return err;
+            \\    if (extractSourceUrl(allocator, metadata_content)) |source_url| {
+            \\        defer allocator.free(source_url);
+            \\        const archive_url = try std.fmt.allocPrint(allocator, "{s}/archive/refs/heads/main.zip", .{source_url});
+            \\        defer allocator.free(archive_url);
+            \\        const install_result = std.process.Child.run(.{ .allocator = allocator, .argv = &[_][]const u8{ python_exe, "-m", "pip", "install", archive_url } }) catch |err| {
+            \\            std.log.err("Failed to install from source: {}", .{err});
+            \\            return;
             \\        };
             \\        defer allocator.free(install_result.stdout);
             \\        defer allocator.free(install_result.stderr);
-            \\
-            \\        if (install_result.term.Exited != 0) {
-            \\            std.log.err("Package install failed with exit code {}: {s}", .{install_result.term.Exited, install_result.stderr});
-            \\        } else {
-            \\            // Package installed successfully
-            \\        }
+            \\        if (install_result.term.Exited == 0) return;
+            \\        std.log.err("pip install failed: {s}", .{install_result.stderr});
+            \\        return;
             \\    }
+            \\}
+            \\
+            \\fn extractSourceUrl(allocator: std.mem.Allocator, json: []const u8) ?[]u8 {
+            \\    const needle = "\"source_url\":";
+            \\    const start = std.mem.indexOf(u8, json, needle) orelse return null;
+            \\    const after_key = start + needle.len;
+            \\    const trimmed = std.mem.trimLeft(u8, json[after_key..], " \t\n");
+            \\    if (trimmed.len == 0 or trimmed[0] == 'n') return null;
+            \\    if (trimmed[0] != '"') return null;
+            \\    const quote_end = std.mem.indexOf(u8, trimmed[1..], "\"") orelse return null;
+            \\    return allocator.dupe(u8, trimmed[1..quote_end + 1]) catch null;
             \\}
             \\
             \\fn executeApplication(allocator: std.mem.Allocator, temp_dir: []const u8, args: []const []const u8) !void {
@@ -736,11 +717,7 @@ pub const BundleGenerator = struct {
             else => "bundlr_stub",
         };
 
-        const output_path = try std.fmt.allocPrint(
-            self.allocator,
-            "{s}/{s}",
-            .{ std.fs.path.dirname(source_path).?, output_name }
-        );
+        const output_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ std.fs.path.dirname(source_path).?, output_name });
         errdefer self.allocator.free(output_path); // Free on error
 
         // Build zig compile command for cross-compilation
@@ -763,14 +740,10 @@ pub const BundleGenerator = struct {
             "-O",
             "ReleaseFast",
             "--name",
-            output_name[0..output_name.len - if (std.mem.endsWith(u8, output_name, ".exe")) @as(usize, 4) else @as(usize, 0)],
+            output_name[0 .. output_name.len - if (std.mem.endsWith(u8, output_name, ".exe")) @as(usize, 4) else @as(usize, 0)],
         };
 
-        const result = try bundlr.platform.process.run(
-            self.allocator,
-            &compile_args,
-            std.fs.path.dirname(source_path).?
-        );
+        const result = try bundlr.platform.process.run(self.allocator, &compile_args, std.fs.path.dirname(source_path).?);
 
         if (result != 0) {
             return error.StubCompilationFailed;
@@ -897,23 +870,15 @@ pub const BundleGenerator = struct {
             \\{{
             \\  "bundle_version": "1.0",
             \\  "package_name": "{s}",
+            \\  "source_url": {s},
             \\  "python_version": "{s}",
             \\  "target_platform": "{s}",
             \\  "build_timestamp": {},
             \\  "bundlr_version": "{s}",
             \\  "entry_point": {s}
             \\}}
-        , .{
-            options.dependencies.root_package,
-            options.runtime_bundle.metadata.python_version,
-            options.target.toString(),
-            options.metadata.build_time,
-            options.metadata.bundlr_version,
-            if (options.entry_point) |ep|
-                try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{ep})
-            else
-                "null"
-        });
+        , .{ options.dependencies.root_package, if (options.dependencies.source_url) |url| try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{url}) else "null", options.runtime_bundle.metadata.python_version, options.target.toString(), options.metadata.build_time, options.metadata.bundlr_version, if (options.entry_point) |ep| try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{ep}) else "null" });
+
         defer self.allocator.free(metadata_content);
 
         const metadata_file = try std.fs.createFileAbsolute(metadata_path, .{});
@@ -944,13 +909,7 @@ pub const BundleGenerator = struct {
     }
 
     /// Assemble final executable from components
-    fn assembleFinalExecutable(
-        self: *BundleGenerator,
-        stub_path: []const u8,
-        components: BundleComponents,
-        metadata: BundleMetadata,
-        output_path: []const u8
-    ) ![]u8 {
+    fn assembleFinalExecutable(self: *BundleGenerator, stub_path: []const u8, components: BundleComponents, metadata: BundleMetadata, output_path: []const u8) ![]u8 {
         _ = metadata;
 
         // Create tar archive of bundle components (use gzip for speed since runtime is already compressed)
@@ -1007,12 +966,7 @@ pub const BundleGenerator = struct {
     }
 
     /// Calculate component sizes
-    fn calculateComponentSizes(
-        self: *BundleGenerator,
-        stub_path: []const u8,
-        components: BundleComponents,
-        final_executable: []const u8
-    ) !ComponentSizes {
+    fn calculateComponentSizes(self: *BundleGenerator, stub_path: []const u8, components: BundleComponents, final_executable: []const u8) !ComponentSizes {
         const stub_size = try self.getFileSize(stub_path);
         const runtime_size = try self.getFileSize(components.runtime_path);
         const assets_size = try self.getDirectorySize(components.assets_dir);
@@ -1153,3 +1107,4 @@ test "component sizes calculation" {
 
     try std.testing.expect(sizes.total_size == 0); // Files don't exist, so size is 0
 }
+

@@ -28,11 +28,13 @@ pub const PackageInfo = struct {
 /// Complete dependency resolution result
 pub const DependencyTree = struct {
     root_package: []const u8,
+    source_url: ?[]const u8,
     packages: []PackageInfo,
     resolution_metadata: ResolutionMetadata,
 
     pub fn deinit(self: DependencyTree, allocator: std.mem.Allocator) void {
         allocator.free(self.root_package);
+        if (self.source_url) |url| allocator.free(url);
         for (self.packages) |*pkg| {
             var pkg_mut = pkg.*;
             pkg_mut.deinit(allocator);
@@ -82,13 +84,7 @@ pub const DependencyResolver = struct {
     }
 
     /// Resolve all dependencies for a package
-    pub fn resolveDependencies(
-        self: *DependencyResolver,
-        package: []const u8,
-        target: pipeline.TargetPlatform,
-        python_version: []const u8,
-        exclude_dev_deps: bool
-    ) !DependencyTree {
+    pub fn resolveDependencies(self: *DependencyResolver, package: []const u8, target: pipeline.TargetPlatform, python_version: []const u8, exclude_dev_deps: bool) !DependencyTree {
         std.debug.print("   📦 Resolving dependencies for: {s}\n", .{package});
 
         // Try to use real uv-based dependency resolution
@@ -103,13 +99,7 @@ pub const DependencyResolver = struct {
     }
 
     /// Try real dependency resolution using uv
-    fn tryRealDependencyResolution(
-        self: *DependencyResolver,
-        package: []const u8,
-        target: pipeline.TargetPlatform,
-        python_version: []const u8,
-        exclude_dev_deps: bool
-    ) !DependencyTree {
+    fn tryRealDependencyResolution(self: *DependencyResolver, package: []const u8, target: pipeline.TargetPlatform, python_version: []const u8, exclude_dev_deps: bool) !DependencyTree {
         // Ensure uv is available
         const uv_exe = try self.ensureUv();
         defer self.allocator.free(uv_exe);
@@ -127,35 +117,17 @@ pub const DependencyResolver = struct {
         try self.writeRequirementsFile(requirements_file, package);
 
         // Run uv pip compile to resolve dependencies
-        const resolved_requirements = try self.runUvPipCompile(
-            uv_exe,
-            requirements_file,
-            target,
-            python_version,
-            exclude_dev_deps
-        );
+        const resolved_requirements = try self.runUvPipCompile(uv_exe, requirements_file, target, python_version, exclude_dev_deps);
         defer self.allocator.free(resolved_requirements);
 
         // Parse the resolved requirements into dependency tree
-        const dependency_tree = try self.parseResolvedRequirements(
-            resolved_requirements,
-            package,
-            target,
-            python_version,
-            exclude_dev_deps
-        );
+        const dependency_tree = try self.parseResolvedRequirements(resolved_requirements, package, target, python_version, exclude_dev_deps);
 
         return dependency_tree;
     }
 
     /// Create mock dependency tree for testing/fallback
-    fn createMockDependencyTree(
-        self: *DependencyResolver,
-        package: []const u8,
-        target: pipeline.TargetPlatform,
-        python_version: []const u8,
-        exclude_dev_deps: bool
-    ) !DependencyTree {
+    fn createMockDependencyTree(self: *DependencyResolver, package: []const u8, target: pipeline.TargetPlatform, python_version: []const u8, exclude_dev_deps: bool) !DependencyTree {
         // Create more realistic mock packages based on package name
         var package_count: usize = 1;
         if (std.mem.eql(u8, package, "httpie")) {
@@ -196,7 +168,8 @@ pub const DependencyResolver = struct {
         };
 
         return DependencyTree{
-            .root_package = try self.allocator.dupe(u8, package),
+            .root_package = try self.allocator.dupe(u8, extractPackageName(package)),
+            .source_url = if (isGitRepository(package)) try self.allocator.dupe(u8, package) else null,
             .packages = packages,
             .resolution_metadata = metadata,
         };
@@ -245,7 +218,7 @@ pub const DependencyResolver = struct {
         const file = try std.fs.createFileAbsolute(file_path, .{});
         defer file.close();
 
-        if (self.isGitRepository(package)) {
+        if (isGitRepository(package)) {
             // Validate and potentially fix Git repository URL
             const validated_package = try self.validateGitUrl(package);
             defer self.allocator.free(validated_package);
@@ -263,55 +236,56 @@ pub const DependencyResolver = struct {
     }
 
     /// Run uv pip compile to resolve dependencies
-    fn runUvPipCompile(
-        self: *DependencyResolver,
-        uv_exe: []const u8,
-        requirements_file: []const u8,
-        target: pipeline.TargetPlatform,
-        python_version: []const u8,
-        exclude_dev_deps: bool
-    ) ![]u8 {
-        const output_file = try std.fmt.allocPrint(self.allocator, "{s}.txt", .{requirements_file[0..requirements_file.len - 3]});
+    fn runUvPipCompile(self: *DependencyResolver, uv_exe: []const u8, requirements_file: []const u8, target: pipeline.TargetPlatform, python_version: []const u8, exclude_dev_deps: bool) ![]u8 {
+        const output_file = try std.fmt.allocPrint(self.allocator, "{s}.txt", .{requirements_file[0 .. requirements_file.len - 3]});
         defer self.allocator.free(output_file);
 
         // Build uv pip compile command using fixed array
         var cmd_args: [16][]const u8 = undefined;
         var arg_count: usize = 0;
 
-        cmd_args[arg_count] = uv_exe; arg_count += 1;
-        cmd_args[arg_count] = "pip"; arg_count += 1;
-        cmd_args[arg_count] = "compile"; arg_count += 1;
-        cmd_args[arg_count] = requirements_file; arg_count += 1;
-        cmd_args[arg_count] = "--output-file"; arg_count += 1;
-        cmd_args[arg_count] = output_file; arg_count += 1;
-        cmd_args[arg_count] = "--python-version"; arg_count += 1;
-        cmd_args[arg_count] = python_version; arg_count += 1;
+        cmd_args[arg_count] = uv_exe;
+        arg_count += 1;
+        cmd_args[arg_count] = "pip";
+        arg_count += 1;
+        cmd_args[arg_count] = "compile";
+        arg_count += 1;
+        cmd_args[arg_count] = requirements_file;
+        arg_count += 1;
+        cmd_args[arg_count] = "--output-file";
+        arg_count += 1;
+        cmd_args[arg_count] = output_file;
+        arg_count += 1;
+        cmd_args[arg_count] = "--python-version";
+        arg_count += 1;
+        cmd_args[arg_count] = python_version;
+        arg_count += 1;
 
         // Add platform specification
         const platform_tag = self.getPlatformTag(target);
         if (platform_tag) |tag| {
             if (arg_count + 2 < cmd_args.len) {
-                cmd_args[arg_count] = "--python-platform"; arg_count += 1;
-                cmd_args[arg_count] = tag; arg_count += 1;
+                cmd_args[arg_count] = "--python-platform";
+                arg_count += 1;
+                cmd_args[arg_count] = tag;
+                arg_count += 1;
             }
         }
 
         // Add optimisation flags
         if (exclude_dev_deps and arg_count < cmd_args.len) {
-            cmd_args[arg_count] = "--no-deps"; arg_count += 1;
+            cmd_args[arg_count] = "--no-deps";
+            arg_count += 1;
         }
 
         // Include wheel URLs and hashes
         if (arg_count < cmd_args.len) {
-            cmd_args[arg_count] = "--generate-hashes"; arg_count += 1;
+            cmd_args[arg_count] = "--generate-hashes";
+            arg_count += 1;
         }
 
         // Execute the command
-        const result = bundlr.platform.process.run(
-            self.allocator,
-            cmd_args[0..arg_count],
-            std.fs.path.dirname(requirements_file).?
-        ) catch |err| {
+        const result = bundlr.platform.process.run(self.allocator, cmd_args[0..arg_count], std.fs.path.dirname(requirements_file).?) catch |err| {
             std.log.err("Failed to run uv pip compile: {}", .{err});
             return error.DependencyResolutionFailed;
         };
@@ -347,14 +321,7 @@ pub const DependencyResolver = struct {
     }
 
     /// Parse resolved requirements file into dependency tree
-    fn parseResolvedRequirements(
-        self: *DependencyResolver,
-        requirements_content: []const u8,
-        root_package: []const u8,
-        target: pipeline.TargetPlatform,
-        python_version: []const u8,
-        exclude_dev_deps: bool
-    ) !DependencyTree {
+    fn parseResolvedRequirements(self: *DependencyResolver, requirements_content: []const u8, root_package: []const u8, target: pipeline.TargetPlatform, python_version: []const u8, exclude_dev_deps: bool) !DependencyTree {
         std.debug.print("   📄 Parsed {} bytes of requirements\n", .{requirements_content.len});
 
         // Extract the actual version for the root package from requirements
@@ -377,7 +344,8 @@ pub const DependencyResolver = struct {
         };
 
         return DependencyTree{
-            .root_package = try self.allocator.dupe(u8, root_package),
+            .root_package = try self.allocator.dupe(u8, extractPackageName(root_package)),
+            .source_url = if (isGitRepository(root_package)) try self.allocator.dupe(u8, root_package) else null,
             .packages = packages,
             .resolution_metadata = metadata,
         };
@@ -392,7 +360,7 @@ pub const DependencyResolver = struct {
                 if (std.mem.indexOf(u8, line, "==")) |eq_pos| {
                     const version_start = eq_pos + 2;
                     const version_end = std.mem.indexOfAny(u8, line[version_start..], " \t\\") orelse line.len - version_start;
-                    return line[version_start..version_start + version_end];
+                    return line[version_start .. version_start + version_end];
                 }
             }
         }
@@ -421,7 +389,7 @@ pub const DependencyResolver = struct {
         if (std.mem.indexOf(u8, line, "--hash=")) |hash_start| {
             const hash_value_start = hash_start + 7; // Length of "--hash="
             const hash_end = std.mem.indexOf(u8, line[hash_value_start..], " ") orelse line.len - hash_value_start;
-            wheel_hash = try self.allocator.dupe(u8, line[hash_value_start..hash_value_start + hash_end]);
+            wheel_hash = try self.allocator.dupe(u8, line[hash_value_start .. hash_value_start + hash_end]);
         }
 
         return PackageInfo{
@@ -432,25 +400,12 @@ pub const DependencyResolver = struct {
         };
     }
 
-    /// Check if package specification is a Git repository
-    fn isGitRepository(self: *DependencyResolver, package: []const u8) bool {
-        _ = self;
-        return std.mem.startsWith(u8, package, "http://") or
-               std.mem.startsWith(u8, package, "https://") or
-               std.mem.startsWith(u8, package, "git@") or
-               std.mem.indexOf(u8, package, "github.com") != null or
-               std.mem.indexOf(u8, package, "gitlab.com") != null;
-    }
-
     /// Validate and fix common Git repository URL issues
     fn validateGitUrl(self: *DependencyResolver, package: []const u8) ![]u8 {
         // Check for common GitHub URL mistakes
         if (std.mem.startsWith(u8, package, "https://github/")) {
             // Missing .com - common mistake
-            const fixed_url = try std.fmt.allocPrint(
-                self.allocator,
-                "https://github.com{s}",
-                .{package[14..]} // Skip "https://github"
+            const fixed_url = try std.fmt.allocPrint(self.allocator, "https://github.com{s}", .{package[14..]} // Skip "https://github"
             );
             std.log.warn("Fixed malformed GitHub URL: {s} -> {s}", .{ package, fixed_url });
             return fixed_url;
@@ -458,10 +413,7 @@ pub const DependencyResolver = struct {
 
         if (std.mem.startsWith(u8, package, "http://github/")) {
             // Missing .com and using http instead of https
-            const fixed_url = try std.fmt.allocPrint(
-                self.allocator,
-                "https://github.com{s}",
-                .{package[13..]} // Skip "http://github"
+            const fixed_url = try std.fmt.allocPrint(self.allocator, "https://github.com{s}", .{package[13..]} // Skip "http://github"
             );
             std.log.warn("Fixed malformed GitHub URL: {s} -> {s}", .{ package, fixed_url });
             return fixed_url;
@@ -471,6 +423,25 @@ pub const DependencyResolver = struct {
         return try self.allocator.dupe(u8, package);
     }
 };
+
+/// Check if package specification is a Git repository
+pub fn isGitRepository(package: []const u8) bool {
+    return std.mem.startsWith(u8, package, "http://") or
+        return std.mem.startsWith(u8, package, "http://") or
+            std.mem.startsWith(u8, package, "https://") or
+            std.mem.startsWith(u8, package, "git@") or
+            std.mem.indexOf(u8, package, "github.com") != null or
+            std.mem.indexOf(u8, package, "gitlab.com") != null;
+}
+
+/// Extract package name from Git URL
+pub fn extractPackageName(package: []const u8) []const u8 {
+    if (!isGitRepository(package)) return package;
+    // Extract repo name from URL like https://github.com/psf/black -> black
+    const trimmed = std.mem.trimRight(u8, package, "/");
+    if (std.mem.lastIndexOf(u8, trimmed, "/")) |last_slash| return trimmed[last_slash + 1 ..];
+    return package;
+}
 
 // Tests
 test "dependency resolver initialization" {
@@ -498,3 +469,4 @@ test "package line parsing" {
     try std.testing.expectEqualStrings("6.1", package_info.version);
     try std.testing.expectEqualStrings("sha256:abc123def456", package_info.wheel_hash.?);
 }
+

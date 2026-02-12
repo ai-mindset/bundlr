@@ -8,10 +8,10 @@ const dependency_resolver = @import("dependency_resolver.zig");
 
 /// Asset type classification
 pub const AssetType = enum {
-    wheel,           // Python wheel file
-    source_dist,     // Source distribution
-    compiled_ext,    // Compiled extension
-    data_file,       // Data/resource file
+    wheel, // Python wheel file
+    source_dist, // Source distribution
+    compiled_ext, // Compiled extension
+    data_file, // Data/resource file
 };
 
 /// Individual asset information
@@ -119,89 +119,66 @@ pub const AssetCollector = struct {
     }
 
     /// Collect all assets for the given packages and target platform
-    pub fn collectAssets(
-        self: *AssetCollector,
-        packages: []dependency_resolver.PackageInfo,
-        target: pipeline.TargetPlatform
-    ) !AssetBundle {
+    pub fn collectAssets(self: *AssetCollector, packages: []dependency_resolver.PackageInfo, target: pipeline.TargetPlatform) !AssetBundle {
         const start_time = std.time.milliTimestamp();
-
         std.debug.print("📥 Collecting assets for {} packages...\n", .{packages.len});
 
-        // Simplified approach - allocate assets array directly
         var assets = try self.allocator.alloc(Asset, packages.len);
         var total_size: u64 = 0;
         var cache_hits: u32 = 0;
-
         var assets_filled: usize = 0;
+
         errdefer {
-            // Clean up any partially filled assets on error
             for (0..assets_filled) |j| {
                 assets[j].deinit(self.allocator);
             }
             self.allocator.free(assets);
         }
 
-        for (packages, 0..) |package, i| {
+        for (packages) |package| {
             std.debug.print("  📦 Processing {s} v{s}...\n", .{ package.name, package.version });
 
-            // Find compatible wheel for target platform
             var asset = self.findBestAsset(package, target) catch |err| blk: {
                 std.log.warn("Failed to find asset for {s}: {}", .{ package.name, err });
-
-                // Fallback to source distribution
+                if (err == error.GitRepositoryNoWheel) continue;
                 break :blk self.createSourceDistAsset(package) catch |fallback_err| {
                     std.log.err("Failed to create fallback asset for {s}: {}", .{ package.name, fallback_err });
                     return error.AssetCreationFailed;
                 };
             };
-            errdefer asset.deinit(self.allocator); // Clean up this asset if subsequent operations fail
 
-            // Download or verify cached asset
+            errdefer asset.deinit(self.allocator);
+
             const downloaded_asset = self.ensureAssetAvailable(asset, &cache_hits) catch |err| {
                 std.log.err("Failed to download asset for {s}: {}", .{ package.name, err });
                 return error.AssetDownloadFailed;
             };
 
             total_size += downloaded_asset.size;
-            assets[i] = downloaded_asset;
+            assets[assets_filled] = downloaded_asset;
             assets_filled += 1;
         }
 
+        const final_assets = try self.allocator.realloc(assets, assets_filled);
+
         const duration = @as(u64, @intCast(std.time.milliTimestamp() - start_time));
-        const cache_hit_rate = if (packages.len > 0)
-            (@as(f32, @floatFromInt(cache_hits)) / @as(f32, @floatFromInt(packages.len))) * 100.0
-        else 0.0;
+        const cache_hit_rate = if (packages.len > 0) (@as(f32, @floatFromInt(cache_hits)) / @as(f32, @floatFromInt(packages.len))) * 100.0 else 0.0;
 
         const metadata = CollectionMetadata{
-            .asset_count = @intCast(assets.len),
+            .asset_count = @intCast(assets_filled),
             .package_count = @intCast(packages.len),
             .collected_at = std.time.timestamp(),
             .cache_hit_rate = cache_hit_rate,
             .download_duration_ms = duration,
         };
 
-        std.debug.print("✅ Collected {} assets ({} MB) in {}ms (cache hit rate: {d:.1}%)\n", .{
-            assets.len,
-            total_size / (1024 * 1024),
-            duration,
-            cache_hit_rate,
-        });
+        std.debug.print("✅ Collected {} assets ({} MB) in {}ms (cache hit rate: {d:.1}%)\n", .{ assets_filled, total_size / (1024 * 1024), duration, cache_hit_rate });
 
-        return AssetBundle{
-            .assets = assets,
-            .total_size = total_size,
-            .target_platform = target,
-            .metadata = metadata,
-        };
+        return AssetBundle{ .assets = final_assets, .total_size = total_size, .target_platform = target, .metadata = metadata };
     }
 
     /// Find the best compatible asset for a package on target platform
-    fn findBestAsset(
-        self: *AssetCollector,
-        package: dependency_resolver.PackageInfo,
-        target: pipeline.TargetPlatform
-    ) !Asset {
+    fn findBestAsset(self: *AssetCollector, package: dependency_resolver.PackageInfo, target: pipeline.TargetPlatform) !Asset {
         // If we already have a wheel URL, use it
         if (package.wheel_url) |wheel_url| {
             return Asset{
@@ -215,6 +192,9 @@ pub const AssetCollector = struct {
                 .platform_tags = try self.createPlatformTags(target),
             };
         }
+
+        // Skip PyPI lookup for Git repository URLs
+        if (dependency_resolver.isGitRepository(package.name)) return error.GitRepositoryNoWheel;
 
         // Query PyPI API for available files
         var pypi_info = try self.queryPyPiPackage(package.name, package.version);
@@ -238,22 +218,14 @@ pub const AssetCollector = struct {
     /// Create source distribution asset as fallback
     fn createSourceDistAsset(self: *AssetCollector, package: dependency_resolver.PackageInfo) !Asset {
         // Query PyPI simple index to get actual download URL
-        const simple_url = try std.fmt.allocPrint(
-            self.allocator,
-            "https://pypi.org/simple/{s}/",
-            .{package.name}
-        );
+        const simple_url = try std.fmt.allocPrint(self.allocator, "https://pypi.org/simple/{s}/", .{package.name});
         defer self.allocator.free(simple_url);
 
         // Fetch the simple index HTML
         const html_response = self.http_client.get(simple_url) catch |err| {
             std.log.warn("Failed to fetch PyPI simple index for {s}: {}", .{ package.name, err });
             // Fallback to direct URL construction
-            const fallback_url = try std.fmt.allocPrint(
-                self.allocator,
-                "https://files.pythonhosted.org/packages/source/{c}/{s}/{s}-{s}.tar.gz",
-                .{ package.name[0], package.name, package.name, package.version }
-            );
+            const fallback_url = try std.fmt.allocPrint(self.allocator, "https://files.pythonhosted.org/packages/source/{c}/{s}/{s}-{s}.tar.gz", .{ package.name[0], package.name, package.name, package.version });
             return Asset{
                 .type = .source_dist,
                 .path = fallback_url,
@@ -274,11 +246,7 @@ pub const AssetCollector = struct {
         const sdist_url = self.extractDownloadUrlFromHtml(html_response, target_filename) catch |err| blk: {
             std.log.warn("Failed to parse download URL from HTML for {s}: {}", .{ package.name, err });
             // Fallback to direct URL construction
-            break :blk try std.fmt.allocPrint(
-                self.allocator,
-                "https://files.pythonhosted.org/packages/source/{c}/{s}/{s}-{s}.tar.gz",
-                .{ package.name[0], package.name, package.name, package.version }
-            );
+            break :blk try std.fmt.allocPrint(self.allocator, "https://files.pythonhosted.org/packages/source/{c}/{s}/{s}-{s}.tar.gz", .{ package.name[0], package.name, package.name, package.version });
         };
 
         return Asset{
@@ -303,7 +271,7 @@ pub const AssetCollector = struct {
         while (std.mem.indexOf(u8, html[start_pos..], href_start)) |href_pos| {
             const absolute_href_pos = start_pos + href_pos + href_start.len;
             const url_end_pos = std.mem.indexOf(u8, html[absolute_href_pos..], href_end) orelse continue;
-            const url = html[absolute_href_pos..absolute_href_pos + url_end_pos];
+            const url = html[absolute_href_pos .. absolute_href_pos + url_end_pos];
 
             // Check if this URL contains our target filename
             if (std.mem.indexOf(u8, url, target_filename) != null) {
@@ -340,7 +308,7 @@ pub const AssetCollector = struct {
     fn downloadAsset(self: *AssetCollector, asset: Asset) ![]u8 {
         // Extract filename from URL to preserve wheel names
         const filename = if (std.mem.lastIndexOf(u8, asset.path, "/")) |last_slash|
-            asset.path[last_slash + 1..]
+            asset.path[last_slash + 1 ..]
         else
             "unknown_asset";
 
@@ -364,11 +332,7 @@ pub const AssetCollector = struct {
 
     /// Generate cache key for asset
     fn generateCacheKey(self: *AssetCollector, asset: Asset) ![]u8 {
-        return try std.fmt.allocPrint(
-            self.allocator,
-            "asset_{s}_{s}_{s}",
-            .{ asset.package_name, asset.package_version, asset.path }
-        );
+        return try std.fmt.allocPrint(self.allocator, "asset_{s}_{s}_{s}", .{ asset.package_name, asset.package_version, asset.path });
     }
 
     /// Get file size in bytes
@@ -408,11 +372,7 @@ pub const AssetCollector = struct {
     /// Query PyPI API for package information
     fn queryPyPiPackage(self: *AssetCollector, name: []const u8, version: []const u8) !std.json.Parsed(std.json.Value) {
         // Construct PyPI API URL
-        const pypi_url = try std.fmt.allocPrint(
-            self.allocator,
-            "https://pypi.org/pypi/{s}/{s}/json",
-            .{ name, version }
-        );
+        const pypi_url = try std.fmt.allocPrint(self.allocator, "https://pypi.org/pypi/{s}/{s}/json", .{ name, version });
         defer self.allocator.free(pypi_url);
 
         std.debug.print("    🌐 Querying PyPI: {s}\n", .{pypi_url});
@@ -424,12 +384,7 @@ pub const AssetCollector = struct {
         std.debug.print("    📄 Received {} bytes from PyPI\n", .{response_body.len});
 
         // Parse JSON response
-        return try std.json.parseFromSlice(
-            std.json.Value,
-            self.allocator,
-            response_body,
-            .{}
-        );
+        return try std.json.parseFromSlice(std.json.Value, self.allocator, response_body, .{});
     }
 
     /// Find best wheel from PyPI response
@@ -551,8 +506,8 @@ pub const AssetCollector = struct {
         var parts = std.mem.splitSequence(u8, filename, "-");
 
         // Skip name and version
-        _ = parts.next() orelse return 0;  // name
-        _ = parts.next() orelse return 0;  // version
+        _ = parts.next() orelse return 0; // name
+        _ = parts.next() orelse return 0; // version
 
         // Get python, abi, and platform tags
         const python_tag = parts.next() orelse return 0;
@@ -561,7 +516,7 @@ pub const AssetCollector = struct {
         // Platform tag might have multiple parts (separated by .)
         var platform_part = parts.rest();
         if (std.mem.endsWith(u8, platform_part, ".whl")) {
-            platform_part = platform_part[0..platform_part.len - 4]; // Remove .whl
+            platform_part = platform_part[0 .. platform_part.len - 4]; // Remove .whl
         }
 
         var score: i32 = 0;
@@ -630,3 +585,4 @@ test "cache key generation" {
     try std.testing.expect(std.mem.indexOf(u8, cache_key, "test-pkg") != null);
     try std.testing.expect(std.mem.indexOf(u8, cache_key, "1.0.0") != null);
 }
+
