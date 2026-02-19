@@ -30,10 +30,9 @@ bundlr black --help                     # Python code formatter
 bundlr https://github.com/psf/black --help
 bundlr https://github.com/ai-mindset/distil --help
 
-# Create portable executables (Build Mode)
-bundlr build cowsay --target linux-x86_64     # Linux executable
-bundlr build httpie --target windows-x86_64   # Windows executable
-bundlr build black --target macos-aarch64     # macOS Apple Silicon
+# Create portable executables (Build Mode - Windows only currently)
+bundlr build cowsay --target windows-x86_64   # Windows executable (working)
+bundlr build httpie --target windows-x86_64   # Windows executable (working)
 
 # Launch GUI mode explicitly
 bundlr --gui
@@ -41,11 +40,13 @@ bundlr --gui
 
 ## 🔨 Build Mode: Create Portable Executables
 
+> **⚠️ Current Status**: Build mode currently supports **Windows targets only**. Linux and macOS target support is in development.
+
 Bundlr can create **standalone, portable executables** that run anywhere without requiring bundlr to be installed on the target system. Perfect for distributing tools or deploying to servers.
 
 ### Features
 - 📦 **Self-contained**: Includes Python runtime + dependencies
-- 🌐 **Cross-platform**: Build for any supported platform from any platform
+- 🌐 **Cross-platform**: Build for Windows (Linux/macOS support coming soon)
 - ⚡ **Optimised**: Multiple optimisation levels for size vs speed
 - 🚀 **No dependencies**: Generated executables run without installation
 
@@ -54,19 +55,21 @@ Bundlr can create **standalone, portable executables** that run anywhere without
 # Basic build command
 bundlr build <package> --target <platform>
 
-# Available targets
-bundlr build cowsay --target linux-x86_64                           # Linux
-bundlr build cowsay --target macos-x86_64                           # macOS Intel
-bundlr build cowsay --target macos-aarch64                          # macOS Apple Silicon
-bundlr build cowsay --target windows-x86_64                         # Windows
+# Currently supported targets
+bundlr build cowsay --target windows-x86_64                         # ✅ Windows (working)
+
+# In development
+bundlr build cowsay --target linux-x86_64                           # 🚧 Linux (in progress)
+bundlr build cowsay --target macos-x86_64                           # 🚧 macOS Intel (in progress)
+bundlr build cowsay --target macos-aarch64                          # 🚧 macOS Apple Silicon (in progress)
 
 # Build from GitHub repositories
-bundlr build https://github.com/psf/black --target linux-x86_64
+bundlr build https://github.com/psf/black --target windows-x86_64
 
 # Optimisation levels (optional)
-bundlr build httpie --target linux-x86_64 --optimise-speed          # Faster execution
-bundlr build httpie --target linux-x86_64 --optimise-size           # Smaller binary
-bundlr build httpie --target linux-x86_64 --optimise-compatibility  # Default
+bundlr build httpie --target windows-x86_64 --optimise-speed          # Faster execution
+bundlr build httpie --target windows-x86_64 --optimise-size           # Smaller binary
+bundlr build httpie --target windows-x86_64 --optimise-compatibility  # Default
 ```
 
 Generated **self-extracting bundles** (~100-150MB) work on any system without Python/bundlr installed.
@@ -81,7 +84,7 @@ Generated **self-extracting bundles** (~100-150MB) work on any system without Py
 
 **vs. Git clone + setup:** Skip the clone, virtual environment creation, and dependency installation dance.
 
-**vs. PyInstaller/cx_Freeze:** No need to install Python or packaging tools. Build cross-platform executables from any platform.
+**vs. PyInstaller/cx_Freeze:** No need to install Python or packaging tools. Build Windows executables from any platform (cross-platform support expanding).
 
 **Use cases:** Testing tools instantly, creating portable executables, CI/CD deployment, one-off scripts, air-gapped systems.
 
@@ -122,7 +125,7 @@ cd bundlr && zig build
 
 **Instant Execution** (`bundlr <package>`): Downloads Python 3.14 (~60MB), creates isolated environment, installs package, executes command. ~10s cold start, ~2s cached.
 
-**Build Mode** (`bundlr build <package> --target <platform>`): Creates optimised Python runtime bundle, collects dependencies, generates cross-platform self-extracting executable. ~50s with caching optimisations.
+**Build Mode** (`bundlr build <package> --target <platform>`): Creates optimised Python runtime bundle, collects dependencies, generates self-extracting executable for Windows targets. ~50s with caching optimisations.
 
 - **Security**: Command injection prevention, isolated execution, no system pollution
 - **Architecture**: Single Zig binary, 1GB cache limit, comprehensive testing
