@@ -1076,10 +1076,20 @@ pub const BundleGenerator = struct {
     }
 
     fn copyFile(self: *BundleGenerator, src: []const u8, dest: []const u8) !void {
-        const cp_args = [_][]const u8{ "cp", src, dest };
-        const result = try bundlr.platform.process.run(self.allocator, &cp_args, ".");
-        if (result != 0) {
-            return error.FileCopyFailed;
+        _ = self;
+        const copy_options = std.fs.CopyFileOptions{};
+
+        if (std.fs.path.isAbsolute(src) and std.fs.path.isAbsolute(dest)) {
+            std.fs.copyFileAbsolute(src, dest, copy_options) catch |err| {
+                std.log.err("Failed to copy file from {s} to {s}: {}", .{ src, dest, err });
+                return error.FileCopyFailed;
+            };
+        } else {
+            const cwd = std.fs.cwd();
+            cwd.copyFile(src, cwd, dest, copy_options) catch |err| {
+                std.log.err("Failed to copy file from {s} to {s} (cwd-relative): {}", .{ src, dest, err });
+                return error.FileCopyFailed;
+            };
         }
     }
 
