@@ -377,12 +377,15 @@ pub const RuntimeEmbedder = struct {
     fn createRuntimeArchive(self: *RuntimeEmbedder, runtime_dir: []const u8, config: RuntimeConfig) ![]u8 {
         std.debug.print("  📦 Creating runtime archive...\n", .{});
 
-        // Create archive in /tmp directory with predictable cache name
+        // Create archive in platform-appropriate temporary directory with predictable cache name
         const archive_name = try std.fmt.allocPrint(self.allocator, "runtime_{s}_{s}_{s}.tar.gz", .{ config.python_version, config.target_platform.toString(), @tagName(config.optimize_level) });
         defer self.allocator.free(archive_name);
 
-        const archive_path = try std.fmt.allocPrint(self.allocator, "/tmp/{s}", .{archive_name});
+        // Use bundlr's platform paths helper to get a portable temporary directory
+        const tmp_dir = try bundlr.platform.paths.Paths.getTemporaryDir(self.allocator);
+        defer self.allocator.free(tmp_dir);
 
+        const archive_path = try std.fs.path.join(self.allocator, &.{ tmp_dir, archive_name });
         std.debug.print("  🔧 Creating archive: {s}\n", .{archive_path});
         std.debug.print("  📂 Source directory: {s}\n", .{runtime_dir});
 
