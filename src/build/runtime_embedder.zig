@@ -4,6 +4,7 @@
 const std = @import("std");
 const bundlr = @import("../bundlr.zig");
 const pipeline = @import("pipeline.zig");
+const builtin = @import("builtin");
 
 /// Python runtime configuration options
 pub const RuntimeConfig = struct {
@@ -400,46 +401,60 @@ pub const RuntimeEmbedder = struct {
     }
 
     /// Create archive using platform-appropriate tools
+    /// NOTE: Uses HOST platform tools (not target), since archive creation
+    /// happens at build time on the machine running bundlr.
     fn createArchiveWithSystemTools(self: *RuntimeEmbedder, source_dir: []const u8, archive_path: []const u8, target: pipeline.TargetPlatform) !void {
-        switch (target) {
-            .windows_x86_64, .windows_aarch64 => {
-                // On Windows, use PowerShell Compress-Archive (creates .zip, not .tar.gz)
-                // For compatibility, we'll create a .zip file instead when tar is unavailable
-                const zip_path = try std.fmt.allocPrint(self.allocator, "{s}.zip", .{archive_path[0 .. archive_path.len - 7]} // Remove .tar.gz extension
-                );
-                defer self.allocator.free(zip_path);
+        _ = target; // Archive creation always uses host platform tools
+        switch (builtin.os.tag) {
+            .windows => {
+                // On Windows hosts, try tar first (available on Windows 10+),
+                // then fall back to PowerShell Compress-Archive
+                self.createArchiveWithTar(source_dir, archive_path) catch |err| {
+                    if (err == error.TarNotAvailable or err == error.FileNotFound) {
+                        std.debug.print("  ⚠️  tar not available, falling back to PowerShell...\n", .{});
 
-                const command = try std.fmt.allocPrint(
-                    self.allocator,
-                    "& {{Compress-Archive -LiteralPath '{s}' -DestinationPath '{s}' -CompressionLevel Fastest -Force}}",
-                    .{ source_dir, zip_path },
-                );
-                defer self.allocator.free(command);
+                        // PowerShell creates .zip, so we create a temp zip then rename
+                        const zip_path = std.fmt.allocPrint(self.allocator, "{s}.zip", .{
+                            archive_path[0 .. archive_path.len - 7], // Remove .tar.gz
+                        }) catch return error.OutOfMemory;
+                        defer self.allocator.free(zip_path);
 
-                const args = [_][]const u8{
-                    "powershell",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    command,
+                        const command = std.fmt.allocPrint(
+                            self.allocator,
+                            "& {{Compress-Archive -LiteralPath '{s}' -DestinationPath '{s}' -CompressionLevel Fastest -Force}}",
+                            .{ source_dir, zip_path },
+                        ) catch return error.OutOfMemory;
+                        defer self.allocator.free(command);
+
+                        const args = [_][]const u8{
+                            "powershell",
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command",
+                            command,
+                        };
+
+                        std.debug.print("  💻 Using PowerShell to create archive...\n", .{});
+                        const result = bundlr.platform.process.run(self.allocator, &args, ".") catch {
+                            return error.ArchiveCreationFailed;
+                        };
+
+                        if (result != 0) {
+                            std.debug.print("  ❌ PowerShell archive creation failed with exit code: {}\n", .{result});
+                            return error.ArchiveCreationFailed;
+                        }
+
+                        // Copy the zip to the expected .tar.gz path for pipeline consistency
+                        self.copyFile(zip_path, archive_path) catch return error.ArchiveCreationFailed;
+                        std.fs.deleteFileAbsolute(zip_path) catch {};
+                    } else {
+                        return err;
+                    }
                 };
-
-                std.debug.print("  💻 Using PowerShell to create archive on Windows...\n", .{});
-                const result = try bundlr.platform.process.run(self.allocator, &args, ".");
-
-                if (result != 0) {
-                    // Fallback: try using tar on Windows 10+ (if available)
-                    std.debug.print("  ⚠️  PowerShell failed, trying system tar...\n", .{});
-                    try self.createArchiveWithTar(source_dir, archive_path);
-                } else {
-                    // Copy the zip file to the expected tar.gz location for consistency
-                    try self.copyFile(zip_path, archive_path);
-                    std.fs.deleteFileAbsolute(zip_path) catch {};
-                }
             },
             else => {
-                // Unix-like systems: use tar
+                // Unix-like hosts (Linux, macOS): use tar directly
                 try self.createArchiveWithTar(source_dir, archive_path);
             },
         }
@@ -612,7 +627,7 @@ pub const RuntimeEmbedder = struct {
                         std.log.warn("Failed to create symlink {s} -> {s}: {}", .{ dest_path, link_target, err });
                     };
                 },
-                .unknown => std.log.warn("Skipping file with unknown type: {s}", .{ src_path }),
+                .unknown => std.log.warn("Skipping file with unknown type: {s}", .{src_path}),
                 else => std.log.warn("Skipping unsupported file type: {s} ({})", .{ src_path, kind }),
             }
         }

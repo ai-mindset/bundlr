@@ -28,6 +28,9 @@ pub const BundleOptions = struct {
     /// Entry point command/script
     entry_point: ?[]const u8 = null,
 
+    /// Discovered Python module name (overrides package name for python -m)
+    module_name: ?[]const u8 = null,
+
     /// Build metadata
     metadata: pipeline.BuildMetadata,
 };
@@ -625,8 +628,14 @@ pub const BundleGenerator = struct {
             \\    const assets_dir = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "assets" });
             \\    defer allocator.free(assets_dir);
             \\
-            \\    // Build Python script to run the module as a command
-            \\    const python_script = try std.fmt.allocPrint(allocator,
+            \\    const python_script = if (extractEntryPointFromJson(allocator, metadata_content)) |ep| blk: {
+            \\        defer allocator.free(ep);
+            \\        break :blk try std.fmt.allocPrint(allocator,
+            \\            \\import sys
+            \\            \\import subprocess
+            \\            \\sys.exit(subprocess.call([sys.executable, '-m', '{s}'] + sys.argv[1:]))
+            \\        , .{ep});
+            \\    } else try std.fmt.allocPrint(allocator,
             \\        \\import sys
             \\        \\import subprocess
             \\        \\sys.exit(subprocess.call([sys.executable, '-m', '{s}'] + sys.argv[1:]))
@@ -704,6 +713,24 @@ pub const BundleGenerator = struct {
             \\
             \\    const value_end = pos;
             \\    return try allocator.dupe(u8, json_content[value_start..value_end]);
+            \\}
+            \\
+            \\fn extractEntryPointFromJson(allocator: std.mem.Allocator, json_content: []const u8) ?[]u8 {
+            \\    const needle = "\"entry_point\":";
+            \\    const start_pos = std.mem.indexOf(u8, json_content, needle) orelse return null;
+            \\    var pos = start_pos + needle.len;
+            \\    while (pos < json_content.len and (json_content[pos] == ' ' or json_content[pos] == '\t' or json_content[pos] == '\n')) {
+            \\        pos += 1;
+            \\    }
+            \\    if (pos >= json_content.len or json_content[pos] == 'n') return null; // null value
+            \\    if (json_content[pos] != '"') return null;
+            \\    pos += 1;
+            \\    const value_start = pos;
+            \\    while (pos < json_content.len and json_content[pos] != '"') {
+            \\        pos += 1;
+            \\    }
+            \\    if (pos >= json_content.len) return null;
+            \\    return allocator.dupe(u8, json_content[value_start..pos]) catch null;
             \\}
         ;
 
@@ -877,12 +904,14 @@ pub const BundleGenerator = struct {
             \\  "bundlr_version": "{s}",
             \\  "entry_point": {s}
             \\}}
-        , .{ options.dependencies.root_package, if (options.dependencies.source_url) |url| try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{url}) else "null", options.runtime_bundle.metadata.python_version, options.target.toString(), options.metadata.build_time, options.metadata.bundlr_version, if (options.entry_point) |ep| try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{ep}) else "null" });
+        , .{ options.module_name orelse options.dependencies.root_package, if (options.dependencies.source_url) |url| try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{url}) else "null", options.runtime_bundle.metadata.python_version, options.target.toString(), options.metadata.build_time, options.metadata.bundlr_version, if (options.entry_point) |ep| try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{ep}) else "null" });
 
         defer self.allocator.free(metadata_content);
 
         const metadata_file = try std.fs.createFileAbsolute(metadata_path, .{});
         defer metadata_file.close();
+
+        std.debug.print("🔍 writing entry_point: {?s}\n", .{options.entry_point});
         try metadata_file.writeAll(metadata_content);
     }
 
@@ -896,7 +925,7 @@ pub const BundleGenerator = struct {
 
         return BundleMetadata{
             .bundle_version = try self.allocator.dupe(u8, "1.0"),
-            .package_name = try self.allocator.dupe(u8, options.dependencies.root_package),
+            .package_name = try self.allocator.dupe(u8, options.module_name orelse options.dependencies.root_package),
             .package_version = try self.allocator.dupe(u8, "1.0.0"), // TODO: Extract from dependencies
             .python_version = try self.allocator.dupe(u8, options.runtime_bundle.metadata.python_version),
             .target_platform = try self.allocator.dupe(u8, options.target.toString()),

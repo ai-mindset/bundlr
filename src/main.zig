@@ -8,12 +8,7 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     print("   Launching dialogue interface...\n\n", .{});
 
     // Get package name or repository
-    var package_result = bundlr.gui.dialogues.showInputDialogue(
-        allocator,
-        "Bundlr - Package Runner",
-        "Enter PyPI package or Git URL:",
-        "cowsay"
-    ) catch |err| {
+    var package_result = bundlr.gui.dialogues.showInputDialogue(allocator, "Bundlr - Package Runner", "Enter PyPI package or Git URL:", "cowsay") catch |err| {
         if (err == error.DialogueCancelled) {
             print("📛 Operation cancelled by user\n", .{});
             return;
@@ -29,12 +24,7 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     }
 
     // Get arguments
-    var args_result = bundlr.gui.dialogues.showInputDialogue(
-        allocator,
-        "Bundlr - Arguments",
-        "Enter arguments (optional):",
-        "-t \"Hello from GUI!\""
-    ) catch |err| {
+    var args_result = bundlr.gui.dialogues.showInputDialogue(allocator, "Bundlr - Arguments", "Enter arguments (optional):", "-t \"Hello from GUI!\"") catch |err| {
         if (err == error.DialogueCancelled) {
             print("📛 Operation cancelled by user\n", .{});
             return;
@@ -152,6 +142,8 @@ fn runBuildMode(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     // Initialize and execute build pipeline
     var pipeline = bundlr.build.pipeline.BuildPipeline.init(allocator, build_options);
+
+    print("🔍 entry_point: {?s}\n", .{build_options.entry_point});
 
     const build_results = pipeline.execute() catch |err| {
         print("❌ Build failed: {}\n", .{err});
@@ -277,10 +269,10 @@ pub fn main() !void {
 /// Detect if a string is a Git repository URL
 fn isGitRepository(package_arg: []const u8) bool {
     return std.mem.startsWith(u8, package_arg, "http://") or
-           std.mem.startsWith(u8, package_arg, "https://") or
-           std.mem.startsWith(u8, package_arg, "git@") or
-           std.mem.indexOf(u8, package_arg, "github.com") != null or
-           std.mem.indexOf(u8, package_arg, "gitlab.com") != null;
+        std.mem.startsWith(u8, package_arg, "https://") or
+        std.mem.startsWith(u8, package_arg, "git@") or
+        std.mem.indexOf(u8, package_arg, "github.com") != null or
+        std.mem.indexOf(u8, package_arg, "gitlab.com") != null;
 }
 
 /// Bootstrap and run a Python application
@@ -410,13 +402,7 @@ fn bootstrapGitApplication(allocator: std.mem.Allocator, config: *const bundlr.c
 }
 
 /// Execute PyPI application using pip virtual environment
-fn executePyPiApplication(
-    allocator: std.mem.Allocator,
-    venv_manager: *bundlr.python.venv.VenvManager,
-    venv_dir: []const u8,
-    config: *const bundlr.config.RuntimeConfig,
-    app_args: []const []const u8
-) !void {
+fn executePyPiApplication(allocator: std.mem.Allocator, venv_manager: *bundlr.python.venv.VenvManager, venv_dir: []const u8, config: *const bundlr.config.RuntimeConfig, app_args: []const []const u8) !void {
     const python_exe = try venv_manager.getVenvPython(venv_dir);
     defer allocator.free(python_exe);
 
@@ -424,20 +410,18 @@ fn executePyPiApplication(
 }
 
 /// Execute Git application using uv virtual environment
-fn executeGitApplication(
-    allocator: std.mem.Allocator,
-    uv_venv_manager: *bundlr.uv.venv.UvVenvManager,
-    venv_dir: []const u8,
-    extract_dir: []const u8,
-    config: *const bundlr.config.RuntimeConfig,
-    app_args: []const []const u8
-) !void {
+fn executeGitApplication(allocator: std.mem.Allocator, uv_venv_manager: *bundlr.uv.venv.UvVenvManager, venv_dir: []const u8, extract_dir: []const u8, config: *const bundlr.config.RuntimeConfig, app_args: []const []const u8) !void {
     // For Git repositories, try to extract the package name from the repository
     var actual_package_name: ?[]u8 = null;
     defer if (actual_package_name) |name| allocator.free(name);
 
     // Try to determine the package name from the Git repository URL
     if (config.git_repository) |repo_url| {
+        // Discover the real Python module name from the extracted repo
+        const discovered_module = discoverModuleInDir(allocator, extract_dir) catch null;
+        print("🔍 extract_dir: {s}\n", .{extract_dir});
+        print("🔍 discovered_module: {?s}\n", .{discovered_module});
+        defer if (discovered_module) |m| allocator.free(m);
         // Extract repo name from URL (e.g., "https://github.com/astral-sh/ruff" -> "ruff")
         const repo_name = blk: {
             const last_slash = std.mem.lastIndexOf(u8, repo_url, "/") orelse break :blk null;
@@ -452,7 +436,7 @@ fn executeGitApplication(
         };
 
         if (repo_name) |name| {
-            actual_package_name = try allocator.dupe(u8, name);
+            actual_package_name = try allocator.dupe(u8, discovered_module orelse name);
 
             // Try running as entry point command first
             if (tryRunEntryPoint(allocator, venv_dir, extract_dir, name, app_args)) {
@@ -478,13 +462,7 @@ fn executeGitApplication(
 }
 
 /// Try to run an application using its entry point command
-fn tryRunEntryPoint(
-    allocator: std.mem.Allocator,
-    venv_dir: []const u8,
-    working_dir: []const u8,
-    package_name: []const u8,
-    app_args: []const []const u8
-) !void {
+fn tryRunEntryPoint(allocator: std.mem.Allocator, venv_dir: []const u8, working_dir: []const u8, package_name: []const u8, app_args: []const []const u8) !void {
     // Build path to the entry point executable in venv/bin/
     const platform = @import("builtin").os.tag;
     const bin_dir = switch (platform) {
@@ -502,7 +480,8 @@ fn tryRunEntryPoint(
     var cmd_args: [16][]const u8 = undefined; // Fixed size array
     var arg_count: usize = 0;
 
-    cmd_args[arg_count] = entry_point_path; arg_count += 1;
+    cmd_args[arg_count] = entry_point_path;
+    arg_count += 1;
 
     // Add application arguments
     for (app_args) |arg| {
@@ -532,13 +511,7 @@ fn tryExecuteEntryPoint(allocator: std.mem.Allocator, working_dir: []const u8, a
 }
 
 /// Common execution logic for both PyPI and Git applications
-fn executeWithPython(
-    allocator: std.mem.Allocator,
-    python_exe: []const u8,
-    working_dir: []const u8,
-    config: *const bundlr.config.RuntimeConfig,
-    app_args: []const []const u8
-) !void {
+fn executeWithPython(allocator: std.mem.Allocator, python_exe: []const u8, working_dir: []const u8, config: *const bundlr.config.RuntimeConfig, app_args: []const []const u8) !void {
     // Build command arguments
     var cmd_args: [16][]const u8 = undefined; // Fixed size array
     var arg_count: usize = 0;
@@ -546,14 +519,20 @@ fn executeWithPython(
     // Try different execution methods
     if (config.entry_point) |entry_point| {
         // Use specified entry point
-        cmd_args[arg_count] = python_exe; arg_count += 1;
-        cmd_args[arg_count] = "-c"; arg_count += 1;
-        cmd_args[arg_count] = entry_point; arg_count += 1;
+        cmd_args[arg_count] = python_exe;
+        arg_count += 1;
+        cmd_args[arg_count] = "-c";
+        arg_count += 1;
+        cmd_args[arg_count] = entry_point;
+        arg_count += 1;
     } else {
         // Try to run as module
-        cmd_args[arg_count] = python_exe; arg_count += 1;
-        cmd_args[arg_count] = "-m"; arg_count += 1;
-        cmd_args[arg_count] = config.project_name; arg_count += 1;
+        cmd_args[arg_count] = python_exe;
+        arg_count += 1;
+        cmd_args[arg_count] = "-m";
+        arg_count += 1;
+        cmd_args[arg_count] = config.project_name;
+        arg_count += 1;
     }
 
     // Add application arguments
@@ -575,6 +554,57 @@ fn executeWithPython(
         print("⚠️  Application exited with code: {}\n", .{exit_code});
         std.process.exit(@intCast(exit_code));
     }
+}
+
+/// Scan an extracted repo for the real Python module name
+/// by looking for directories containing __main__.py
+fn discoverModuleInDir(allocator: std.mem.Allocator, repo_dir: []const u8) !?[]const u8 {
+    // GitHub archives extract to a subdirectory like "repo-main/"
+    // Find it first
+    const inner_dir = try findFirstSubdir(allocator, repo_dir);
+    defer if (inner_dir) |d| allocator.free(d);
+    const base = inner_dir orelse repo_dir;
+
+    // Try src layout first (PEP 621 convention)
+    if (try scanDirForMainModule(allocator, base, "src")) |name| return name;
+    // Then flat layout
+    if (try scanDirForMainModule(allocator, base, null)) |name| return name;
+    return null;
+}
+
+fn findFirstSubdir(allocator: std.mem.Allocator, dir_path: []const u8) !?[]const u8 {
+    var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch return null;
+    defer dir.close();
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        if (entry.kind == .directory and entry.name[0] != '.') {
+            return try std.fs.path.join(allocator, &.{ dir_path, entry.name });
+        }
+    }
+    return null;
+}
+
+fn scanDirForMainModule(allocator: std.mem.Allocator, base_dir: []const u8, sub_dir: ?[]const u8) !?[]const u8 {
+    const search_path = if (sub_dir) |sd|
+        try std.fs.path.join(allocator, &.{ base_dir, sd })
+    else
+        try allocator.dupe(u8, base_dir);
+    defer allocator.free(search_path);
+
+    var dir = std.fs.openDirAbsolute(search_path, .{ .iterate = true }) catch return null;
+    defer dir.close();
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        if (entry.kind != .directory) continue;
+        if (entry.name[0] == '.' or std.mem.eql(u8, entry.name, "__pycache__")) continue;
+
+        const main_path = try std.fs.path.join(allocator, &.{ search_path, entry.name, "__main__.py" });
+        defer allocator.free(main_path);
+
+        std.fs.accessAbsolute(main_path, .{}) catch continue;
+        return try allocator.dupe(u8, entry.name);
+    }
+    return null;
 }
 
 /// Print usage information

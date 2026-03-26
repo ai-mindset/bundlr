@@ -92,10 +92,10 @@ pub const BuildOptions = struct {
 
 /// Optimization levels for build process
 pub const OptimizeLevel = enum {
-    size,         // --optimize-size: Minimize executable size
-    speed,        // --optimize-speed: Maximize runtime performance
-    compatibility,// --optimize-compatibility: Maximum compatibility
-    balanced,     // Default: Balance between size and performance
+    size, // --optimize-size: Minimize executable size
+    speed, // --optimize-speed: Maximize runtime performance
+    compatibility, // --optimize-compatibility: Maximum compatibility
+    balanced, // Default: Balance between size and performance
 };
 
 /// Build metadata to include in the bundle
@@ -175,12 +175,14 @@ pub const BuildPipeline = struct {
             var resolver = dependency_resolver.DependencyResolver.init(self.allocator);
             defer resolver.deinit();
 
-            const dependencies = resolver.resolveDependencies(
-                self.options.package,
-                target,
-                self.options.python_version,
-                self.options.exclude_dev_deps
-            ) catch |err| {
+            // Step 1.5: Discover real Python module name for git packages
+            const module_name = self.discoverModuleName() catch |err| blk: {
+                std.debug.print("⚠️  Module discovery failed ({}), using default\n", .{err});
+                break :blk null;
+            };
+            defer if (module_name) |name| self.allocator.free(name);
+
+            const dependencies = resolver.resolveDependencies(self.options.package, target, self.options.python_version, self.options.exclude_dev_deps) catch |err| {
                 std.debug.print("❌ Failed to resolve dependencies: {}\n", .{err});
                 // Create failed result
                 results[i] = BuildResult{
@@ -253,6 +255,7 @@ pub const BuildPipeline = struct {
                 .assets = assets,
                 .dependencies = dependencies,
                 .entry_point = self.options.entry_point,
+                .module_name = module_name,
                 .metadata = self.createBuildMetadata(target),
             };
 
@@ -345,6 +348,85 @@ pub const BuildPipeline = struct {
         defer file.close();
         const stat = try file.stat();
         return stat.size;
+    }
+
+    /// For git packages, discover the actual Python module name by scanning
+    /// the repository for directories containing __main__.py.
+    /// Returns null for PyPI packages or if no __main__.py is found.
+    fn discoverModuleName(self: *BuildPipeline) !?[]const u8 {
+        // Only applies to git URLs
+        if (std.mem.indexOf(u8, self.options.package, "://") == null) return null;
+
+        std.debug.print("🔍 Discovering Python module name...\n", .{});
+
+        // Download and extract the repository
+        var git_manager = bundlr.git.archive.GitArchiveManager.init(self.allocator);
+        const extract_dir = try git_manager.downloadRepository(
+            self.options.package,
+            null,
+            null,
+            null,
+            null,
+        );
+        defer self.allocator.free(extract_dir);
+
+        // GitHub archives extract to a subdirectory like "repo-branch/"
+        const repo_dir = try self.findRepoRoot(extract_dir);
+        defer if (repo_dir) |d| self.allocator.free(d);
+
+        const search_base = repo_dir orelse extract_dir;
+
+        // Try src layout first (PEP 621), then flat layout
+        if (try self.scanForMainModule(search_base, "src")) |name| {
+            std.debug.print("✅ Discovered module: {s} (src layout)\n", .{name});
+            return name;
+        }
+        if (try self.scanForMainModule(search_base, null)) |name| {
+            std.debug.print("✅ Discovered module: {s} (flat layout)\n", .{name});
+            return name;
+        }
+
+        std.debug.print("⚠️  No __main__.py found, using URL-derived name\n", .{});
+        return null;
+    }
+
+    /// Find the first subdirectory inside an extracted GitHub archive
+    fn findRepoRoot(self: *BuildPipeline, extract_dir: []const u8) !?[]const u8 {
+        var dir = std.fs.openDirAbsolute(extract_dir, .{ .iterate = true }) catch return null;
+        defer dir.close();
+
+        var iter = dir.iterate();
+        while (try iter.next()) |entry| {
+            if (entry.kind == .directory and entry.name[0] != '.') {
+                return try std.fs.path.join(self.allocator, &.{ extract_dir, entry.name });
+            }
+        }
+        return null;
+    }
+
+    /// Scan a directory's immediate children for subdirs containing __main__.py
+    fn scanForMainModule(self: *BuildPipeline, base_dir: []const u8, sub_dir: ?[]const u8) !?[]const u8 {
+        const search_path = if (sub_dir) |sd|
+            try std.fs.path.join(self.allocator, &.{ base_dir, sd })
+        else
+            try self.allocator.dupe(u8, base_dir);
+        defer self.allocator.free(search_path);
+
+        var dir = std.fs.openDirAbsolute(search_path, .{ .iterate = true }) catch return null;
+        defer dir.close();
+
+        var iter = dir.iterate();
+        while (try iter.next()) |entry| {
+            if (entry.kind != .directory) continue;
+            if (entry.name[0] == '.' or std.mem.eql(u8, entry.name, "__pycache__")) continue;
+
+            const main_path = try std.fs.path.join(self.allocator, &.{ search_path, entry.name, "__main__.py" });
+            defer self.allocator.free(main_path);
+
+            std.fs.accessAbsolute(main_path, .{}) catch continue;
+            return try self.allocator.dupe(u8, entry.name);
+        }
+        return null;
     }
 };
 
