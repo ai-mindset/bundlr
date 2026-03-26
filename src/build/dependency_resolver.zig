@@ -18,10 +18,12 @@ pub const PackageInfo = struct {
         allocator.free(self.version);
         if (self.wheel_url) |url| allocator.free(url);
         if (self.wheel_hash) |hash| allocator.free(hash);
-        for (self.dependencies) |*dep| {
-            dep.deinit(allocator);
+        if (self.dependencies.len > 0) {
+            for (self.dependencies) |*dep| {
+                dep.deinit(allocator);
+            }
+            allocator.free(self.dependencies);
         }
-        allocator.free(self.dependencies);
     }
 };
 
