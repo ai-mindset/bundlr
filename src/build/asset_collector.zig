@@ -46,10 +46,12 @@ pub const Asset = struct {
         if (self.hash) |hash| allocator.free(hash);
         allocator.free(self.package_name);
         allocator.free(self.package_version);
-        for (self.platform_tags) |tag| {
-            allocator.free(tag);
+        if (self.platform_tags.len > 0) {
+            for (self.platform_tags) |tag| {
+                allocator.free(tag);
+            }
+            allocator.free(self.platform_tags);
         }
-        allocator.free(self.platform_tags);
     }
 };
 
