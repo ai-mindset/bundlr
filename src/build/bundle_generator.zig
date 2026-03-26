@@ -893,19 +893,18 @@ pub const BundleGenerator = struct {
 
     /// Write metadata file
     fn writeMetadataFile(self: *BundleGenerator, metadata_path: []const u8, options: BundleOptions) !void {
-        const metadata_content = try std.fmt.allocPrint(self.allocator,
-            \\{{
-            \\  "bundle_version": "1.0",
-            \\  "package_name": "{s}",
-            \\  "source_url": {s},
-            \\  "python_version": "{s}",
-            \\  "target_platform": "{s}",
-            \\  "build_timestamp": {},
-            \\  "bundlr_version": "{s}",
-            \\  "entry_point": {s}
-            \\}}
-        , .{ options.module_name orelse options.dependencies.root_package, if (options.dependencies.source_url) |url| try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{url}) else "null", options.runtime_bundle.metadata.python_version, options.target.toString(), options.metadata.build_time, options.metadata.bundlr_version, if (options.entry_point) |ep| try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{ep}) else "null" });
+        const metadata_value = .{
+            .bundle_version = "1.0",
+            .package_name = options.module_name orelse options.dependencies.root_package,
+            .source_url = options.dependencies.source_url,
+            .python_version = options.runtime_bundle.metadata.python_version,
+            .target_platform = options.target.toString(),
+            .build_timestamp = options.metadata.build_time,
+            .bundlr_version = options.metadata.bundlr_version,
+            .entry_point = options.entry_point,
+        };
 
+        const metadata_content = try std.json.stringifyAlloc(self.allocator, metadata_value, .{});
         defer self.allocator.free(metadata_content);
 
         const metadata_file = try std.fs.createFileAbsolute(metadata_path, .{});
