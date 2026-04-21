@@ -316,36 +316,29 @@ fn bootstrapPyPiApplication(allocator: std.mem.Allocator, config: *const bundlr.
     defer allocator.free(python_exe);
     print("🐍 Using Python: {s}\n", .{python_exe});
 
-    // Step 4: Install package from extracted repository
-    print("📋 Installing package from local directory...\n", .{});
+    // Step 3b: Create virtual environment
+    var uv_bootstrap = bundlr.uv.bootstrap.UvManager.init(allocator);
+    const uv_version = try uv_bootstrap.ensureUvInstalled(null);
+    defer allocator.free(uv_version);
+    const uv_exe = try uv_bootstrap.getUvExecutable(uv_version);
+    defer allocator.free(uv_exe);
+
+    var uv_venv_manager = bundlr.uv.venv.UvVenvManager.init(allocator, uv_exe);
+    const venv_dir = try uv_venv_manager.create(config.project_name, config.python_version);
+    defer allocator.free(venv_dir);
+
+    // Step 4: Install project package using uv
+    print("📋 Installing project package: {s}\n", .{config.project_name});
     var uv_installer = bundlr.uv.installer.UvPackageInstaller.init(allocator, uv_exe, venv_dir);
 
-    // GitHub archives extract into a subdirectory (e.g. "repo-branch/"),
-    // so find the inner dir that actually contains pyproject.toml
-    const inner_dir = try findFirstSubdir(allocator, extract_dir);
-    defer if (inner_dir) |d| allocator.free(d);
-    const install_dir = inner_dir orelse extract_dir;
-    print("📂 Installing from: {s}\n", .{install_dir});
-
-    try uv_installer.installFromPath(install_dir);
-    print("✅ Package installed successfully\n", .{});
-
-    // Step 5: Install project package
-    print("📋 Installing project package: {s}\n", .{config.project_name});
-    const pip_path = try venv_manager.getVenvPip(venv_dir);
-    defer allocator.free(pip_path);
-
-    var installer = bundlr.python.installer.PackageInstaller.init(allocator, pip_path);
-
-    // Install the project package
-    installer.installPackage(config.project_name) catch |err| {
+    uv_installer.installPackage(config.project_name) catch |err| {
         print("⚠️  Package installation failed: {}\n", .{err});
         print("   This might be expected if the package doesn't exist in PyPI\n", .{});
     };
 
-    // Step 6: Execute the application
+    // Step 5: Execute the application
     print("🎯 Executing application...\n", .{});
-    try executePyPiApplication(allocator, &venv_manager, venv_dir, config, app_args);
+    try executePyPiApplication(allocator, &uv_venv_manager, venv_dir, config, app_args);
 }
 
 /// Bootstrap Git repository application (new workflow)
@@ -409,7 +402,7 @@ fn bootstrapGitApplication(allocator: std.mem.Allocator, config: *const bundlr.c
 }
 
 /// Execute PyPI application using pip virtual environment
-fn executePyPiApplication(allocator: std.mem.Allocator, venv_manager: *bundlr.python.venv.VenvManager, venv_dir: []const u8, config: *const bundlr.config.RuntimeConfig, app_args: []const []const u8) !void {
+fn executePyPiApplication(allocator: std.mem.Allocator, venv_manager: *bundlr.uv.venv.UvVenvManager, venv_dir: []const u8, config: *const bundlr.config.RuntimeConfig, app_args: []const []const u8) !void {
     const python_exe = try venv_manager.getVenvPython(venv_dir);
     defer allocator.free(python_exe);
 

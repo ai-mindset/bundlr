@@ -111,6 +111,9 @@ pub const BuildMetadata = struct {
 
     /// Target platform
     target_platform: ?[]const u8 = null,
+
+    // Git branch
+    git_branch: ?[]const u8 = null,
 };
 
 /// Build pipeline result

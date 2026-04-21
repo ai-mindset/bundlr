@@ -574,7 +574,9 @@ pub const BundleGenerator = struct {
             \\
             \\    if (extractSourceUrl(allocator, metadata_content)) |source_url| {
             \\        defer allocator.free(source_url);
-            \\        const archive_url = try std.fmt.allocPrint(allocator, "{s}/archive/refs/heads/main.zip", .{source_url});
+            \\        const branch = extractSourceBranch(allocator, metadata_content) orelse try allocator.dupe(u8, "main");
+            \\        defer allocator.free(branch);
+            \\        const archive_url = try std.fmt.allocPrint(allocator, "{s}/archive/refs/heads/{s}.zip", .{ source_url, branch });
             \\        defer allocator.free(archive_url);
             \\        const install_result = std.process.Child.run(.{ .allocator = allocator, .argv = &[_][]const u8{ python_exe, "-m", "pip", "install", archive_url } }) catch |err| {
             \\            std.log.err("Failed to install from source: {}", .{err});
@@ -586,6 +588,17 @@ pub const BundleGenerator = struct {
             \\        std.log.err("pip install failed: {s}", .{install_result.stderr});
             \\        return;
             \\    }
+            \\}
+            \\
+            \\fn extractSourceBranch(allocator: std.mem.Allocator, json: []const u8) ?[]u8 {
+            \\    const needle = "\"source_branch\":";
+            \\    const start = std.mem.indexOf(u8, json, needle) orelse return null;
+            \\    const after_key = start + needle.len;
+            \\    const trimmed = std.mem.trimLeft(u8, json[after_key..], " \t\n");
+            \\    if (trimmed.len == 0 or trimmed[0] == 'n') return null;
+            \\    if (trimmed[0] != '"') return null;
+            \\    const quote_end = std.mem.indexOf(u8, trimmed[1..], "\"") orelse return null;
+            \\    return allocator.dupe(u8, trimmed[1..quote_end + 1]) catch null;
             \\}
             \\
             \\fn extractSourceUrl(allocator: std.mem.Allocator, json: []const u8) ?[]u8 {
@@ -893,25 +906,46 @@ pub const BundleGenerator = struct {
 
     /// Write metadata file
     fn writeMetadataFile(self: *BundleGenerator, metadata_path: []const u8, options: BundleOptions) !void {
+        const source_url_json = if (options.dependencies.source_url) |url|
+            try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{url})
+        else
+            try self.allocator.dupe(u8, "null");
+        defer self.allocator.free(source_url_json);
+
+        const entry_point_json = if (options.entry_point) |ep|
+            try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{ep})
+        else
+            try self.allocator.dupe(u8, "null");
+        defer self.allocator.free(entry_point_json);
+
         const metadata_content = try std.fmt.allocPrint(self.allocator,
             \\{{
             \\  "bundle_version": "1.0",
             \\  "package_name": "{s}",
             \\  "source_url": {s},
+            \\  "source_branch": "{s}",
             \\  "python_version": "{s}",
             \\  "target_platform": "{s}",
-            \\  "build_timestamp": {},
+            \\  "build_timestamp": {d},
             \\  "bundlr_version": "{s}",
             \\  "entry_point": {s}
             \\}}
-        , .{ options.module_name orelse options.dependencies.root_package, if (options.dependencies.source_url) |url| try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{url}) else "null", options.runtime_bundle.metadata.python_version, options.target.toString(), options.metadata.build_time, options.metadata.bundlr_version, if (options.entry_point) |ep| try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{ep}) else "null" });
-
+        , .{
+            options.module_name orelse options.dependencies.root_package,
+            source_url_json,
+            options.metadata.git_branch orelse "main",
+            options.runtime_bundle.metadata.python_version,
+            options.target.toString(),
+            options.metadata.build_time,
+            options.metadata.bundlr_version,
+            entry_point_json,
+        });
         defer self.allocator.free(metadata_content);
+
+        std.debug.print("🔍 writing entry_point: {?s}\n", .{options.entry_point});
 
         const metadata_file = try std.fs.createFileAbsolute(metadata_path, .{});
         defer metadata_file.close();
-
-        std.debug.print("🔍 writing entry_point: {?s}\n", .{options.entry_point});
         try metadata_file.writeAll(metadata_content);
     }
 
