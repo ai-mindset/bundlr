@@ -140,7 +140,7 @@ pub const AssetCollector = struct {
 
             var asset = self.findBestAsset(package, target) catch |err| blk: {
                 std.log.warn("Failed to find asset for {s}: {}", .{ package.name, err });
-                if (err == error.GitRepositoryNoWheel) continue;
+                if (err == error.GitRepositoryNoWheel) break :blk try self.createGitAsset(package);
                 break :blk self.createSourceDistAsset(package) catch |fallback_err| {
                     std.log.err("Failed to create fallback asset for {s}: {}", .{ package.name, fallback_err });
                     return error.AssetCreationFailed;
@@ -289,6 +289,13 @@ pub const AssetCollector = struct {
     /// Ensure asset is downloaded and available locally
     fn ensureAssetAvailable(self: *AssetCollector, asset: Asset, cache_hits: *u32) !Asset {
         _ = cache_hits; // Not using cache for now
+
+        // Already cloned/local — no download needed
+        if (asset.type == .source_dist and asset.local_path != null) {
+            var local_asset = asset;
+            local_asset.size = 0; // skip size check on a directory
+            return local_asset;
+        }
 
         // Download the asset
         std.debug.print("    ⬇️  Downloading: {s}\n", .{asset.path});
@@ -548,6 +555,51 @@ pub const AssetCollector = struct {
         _ = value;
         // No-op - std.json.Parsed handles cleanup automatically
     }
+
+    /// Clone a git repository and return it as a source_dist asset
+    fn createGitAsset(self: *AssetCollector, package: dependency_resolver.PackageInfo) !Asset {
+        // Convert /tree/<branch> URL to base + branch
+        const url = package.name;
+        const clone_url: []u8 = blk: {
+            if (std.mem.indexOf(u8, url, "/tree/")) |idx| {
+                break :blk try self.allocator.dupe(u8, url[0..idx]);
+            }
+            break :blk try self.allocator.dupe(u8, url);
+        };
+        defer self.allocator.free(clone_url);
+
+        const branch: ?[]const u8 = if (std.mem.indexOf(u8, url, "/tree/")) |idx|
+            url[idx + "/tree/".len ..]
+        else
+            null;
+
+        // Clone into a temp directory
+        const clone_dir = try std.fmt.allocPrint(self.allocator, "/tmp/bundlr_git_{d}", .{std.time.milliTimestamp()});
+        errdefer self.allocator.free(clone_dir);
+
+        var argv_with_branch = [_][]const u8{ "git", "clone", "--depth", "1", "--branch", branch orelse "", clone_url, clone_dir };
+        var argv_no_branch = [_][]const u8{ "git", "clone", "--depth", "1", clone_url, clone_dir };
+        const argv: []const []const u8 = if (branch != null) &argv_with_branch else &argv_no_branch;
+
+        var child = std.process.Child.init(argv, self.allocator);
+        child.stdout_behavior = .Ignore;
+        child.stderr_behavior = .Ignore;
+        const term = try child.spawnAndWait();
+        if (term != .Exited or term.Exited != 0) return error.GitCloneFailed;
+
+        std.debug.print("    ✅ Cloned {s} to {s}\n", .{ clone_url, clone_dir });
+
+        return Asset{
+            .type = .source_dist,
+            .path = clone_dir,
+            .local_path = try self.allocator.dupe(u8, clone_dir),
+            .size = 0,
+            .hash = null,
+            .package_name = try self.allocator.dupe(u8, package.name),
+            .package_version = try self.allocator.dupe(u8, package.version),
+            .platform_tags = &[_][]const u8{},
+        };
+    }
 };
 
 // Tests
@@ -585,4 +637,3 @@ test "cache key generation" {
     try std.testing.expect(std.mem.indexOf(u8, cache_key, "test-pkg") != null);
     try std.testing.expect(std.mem.indexOf(u8, cache_key, "1.0.0") != null);
 }
-

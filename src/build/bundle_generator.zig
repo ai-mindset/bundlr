@@ -566,29 +566,35 @@ pub const BundleGenerator = struct {
             \\    const python_exe = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "python_runtime", if (builtin.os.tag == .windows) "python.exe" else "bin/python" });
             \\    defer allocator.free(python_exe);
             \\
-            \\    // Check for source_url in metadata (Git repos)
-            \\    const metadata_path = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "metadata.json" });
-            \\    defer allocator.free(metadata_path);
-            \\    const metadata_content = std.fs.cwd().readFileAlloc(allocator, metadata_path, 1024 * 1024) catch "";
-            \\    defer if (metadata_content.len > 0) allocator.free(metadata_content);
+            \\    const assets_dir = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "assets" });
+            \\    defer allocator.free(assets_dir);
             \\
-            \\    if (extractSourceUrl(allocator, metadata_content)) |source_url| {
-            \\        defer allocator.free(source_url);
-            \\        const branch = extractSourceBranch(allocator, metadata_content) orelse try allocator.dupe(u8, "main");
-            \\        defer allocator.free(branch);
-            \\        const archive_url = try std.fmt.allocPrint(allocator, "{s}/archive/refs/heads/{s}.zip", .{ source_url, branch });
-            \\        defer allocator.free(archive_url);
-            \\        const install_result = std.process.Child.run(.{ .allocator = allocator, .argv = &[_][]const u8{ python_exe, "-m", "pip", "install", archive_url } }) catch |err| {
-            \\            std.log.err("Failed to install from source: {}", .{err});
-            \\            return;
-            \\        };
-            \\        defer allocator.free(install_result.stdout);
-            \\        defer allocator.free(install_result.stderr);
-            \\        if (install_result.term.Exited == 0) return;
-            \\        std.log.err("pip install failed: {s}", .{install_result.stderr});
+            \\    var dir = std.fs.openDirAbsolute(assets_dir, .{ .iterate = true }) catch return;
+            \\    defer dir.close();
+            \\
+            \\    var it = dir.iterate();
+            \\    while (try it.next()) |entry| {
+            \\        if (entry.kind != .directory) continue;
+            \\        if (!std.mem.startsWith(u8, entry.name, "bundlr_git_")) continue;
+            \\
+            \\        const src_path = try std.fs.path.join(allocator, &[_][]const u8{ assets_dir, entry.name });
+            \\        defer allocator.free(src_path);
+            \\
+            \\        std.log.info("Installing from bundled source: {s}", .{src_path});
+            \\        const result = try std.process.Child.run(.{
+            \\            .allocator = allocator,
+            \\            .argv = &[_][]const u8{ python_exe, "-m", "pip", "install", src_path },
+            \\        });
+            \\        defer allocator.free(result.stdout);
+            \\        defer allocator.free(result.stderr);
+            \\        if (result.term != .Exited or result.term.Exited != 0) {
+            \\            std.log.err("pip install failed: {s}", .{result.stderr});
+            \\        }
             \\        return;
             \\    }
-            \\}
+            \\
+            \\    std.log.warn("No bundled source directory found in assets, nothing to install", .{});
+            \\}            
             \\
             \\fn extractSourceBranch(allocator: std.mem.Allocator, json: []const u8) ?[]u8 {
             \\    const needle = "\"source_branch\":";
@@ -1110,7 +1116,7 @@ pub const BundleGenerator = struct {
     }
 
     fn copyFile(self: *BundleGenerator, src: []const u8, dest: []const u8) !void {
-        const cp_args = [_][]const u8{ "cp", src, dest };
+        const cp_args = [_][]const u8{ "cp", "-r", src, dest };
         const result = try bundlr.platform.process.run(self.allocator, &cp_args, ".");
         if (result != 0) {
             return error.FileCopyFailed;

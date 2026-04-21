@@ -213,26 +213,34 @@ pub const DependencyResolver = struct {
         };
     }
 
+    /// Convert a GitHub web UI URL to a pip-compatible git+ URL.
+    /// e.g. https://github.com/org/repo/tree/branch
+    ///   -> git+https://github.com/org/repo@branch
+    fn toPipGitUrl(self: *DependencyResolver, url: []const u8) ![]u8 {
+        if (std.mem.indexOf(u8, url, "/tree/")) |idx| {
+            const base = url[0..idx];
+            const branch = url[idx + "/tree/".len ..];
+            return std.fmt.allocPrint(self.allocator, "git+{s}@{s}", .{ base, branch });
+        }
+        // No /tree/ — just prepend git+
+        return std.fmt.allocPrint(self.allocator, "git+{s}", .{url});
+    }
+
     /// Write requirements.in file with the package specification
     fn writeRequirementsFile(self: *DependencyResolver, file_path: []const u8, package: []const u8) !void {
         const file = try std.fs.createFileAbsolute(file_path, .{});
         defer file.close();
 
-        if (isGitRepository(package)) {
-            // Validate and potentially fix Git repository URL
-            const validated_package = try self.validateGitUrl(package);
-            defer self.allocator.free(validated_package);
+        const line = if (isGitRepository(package)) blk: {
+            const validated = try self.validateGitUrl(package);
+            defer self.allocator.free(validated);
+            break :blk try self.toPipGitUrl(validated);
+        } else try std.fmt.allocPrint(self.allocator, "{s}", .{package});
+        defer self.allocator.free(line);
 
-            // Git repository specification
-            const content = try std.fmt.allocPrint(self.allocator, "git+{s}\n", .{validated_package});
-            defer self.allocator.free(content);
-            try file.writeAll(content);
-        } else {
-            // PyPI package specification
-            const content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{package});
-            defer self.allocator.free(content);
-            try file.writeAll(content);
-        }
+        const content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{line});
+        defer self.allocator.free(content);
+        try file.writeAll(content);
     }
 
     /// Run uv pip compile to resolve dependencies
