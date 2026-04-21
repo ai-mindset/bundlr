@@ -295,7 +295,7 @@ pub const RuntimeEmbedder = struct {
 
     /// Optimize the Python runtime by removing unnecessary components
     fn optimizeRuntime(self: *RuntimeEmbedder, base_runtime: []const u8, work_dir: []const u8, config: RuntimeConfig) ![]u8 {
-        std.debug.print("  🔧 Optimizing runtime...\n", .{});
+        // std.debug.print("  🔧 Optimizing runtime...\n", .{});
 
         // Create optimized runtime directory
         const optimized_dir = try std.fs.path.join(self.allocator, &[_][]const u8{ work_dir, "optimized" });

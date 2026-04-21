@@ -178,10 +178,14 @@ fn runBuildMode(allocator: std.mem.Allocator, args: []const []const u8) !void {
 /// Helper function to create runtime configuration
 fn createRuntimeConfig(allocator: std.mem.Allocator, package_arg: []const u8) !bundlr.config.RuntimeConfig {
     const build_config = bundlr.config.BuildConfig{};
-    return if (isGitRepository(package_arg))
-        try bundlr.config.createGit(allocator, package_arg, build_config.default_python_version, null)
-    else
-        try bundlr.config.create(allocator, package_arg, "1.0.0", build_config.default_python_version);
+    if (isGitRepository(package_arg)) {
+        const parsed = try parseGitHubTreeUrl(allocator, package_arg);
+        defer allocator.free(parsed.base_url);
+        defer if (parsed.branch) |b| allocator.free(b);
+        return try bundlr.config.createGit(allocator, parsed.base_url, build_config.default_python_version, parsed.branch);
+    } else {
+        return try bundlr.config.create(allocator, package_arg, "1.0.0", build_config.default_python_version);
+    }
 }
 
 /// Print bootstrap message for configuration
@@ -275,6 +279,20 @@ fn isGitRepository(package_arg: []const u8) bool {
         std.mem.indexOf(u8, package_arg, "gitlab.com") != null;
 }
 
+/// Extract branch from a GitHub /tree/ URL, returning base repo URL and optional branch
+fn parseGitHubTreeUrl(allocator: std.mem.Allocator, url: []const u8) !struct { base_url: []u8, branch: ?[]u8 } {
+    const prefix = "https://github.com/";
+    if (std.mem.startsWith(u8, url, prefix)) {
+        const path = url[prefix.len..];
+        if (std.mem.indexOf(u8, path, "/tree/")) |idx| {
+            const base = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, path[0..idx] });
+            const branch = try allocator.dupe(u8, path[idx + "/tree/".len ..]);
+            return .{ .base_url = base, .branch = branch };
+        }
+    }
+    return .{ .base_url = try allocator.dupe(u8, url), .branch = null };
+}
+
 /// Bootstrap and run a Python application
 fn bootstrapApplication(allocator: std.mem.Allocator, config: *const bundlr.config.RuntimeConfig, app_args: []const []const u8) !void {
     // Route to different bootstrap flows based on source mode
@@ -298,30 +316,19 @@ fn bootstrapPyPiApplication(allocator: std.mem.Allocator, config: *const bundlr.
     defer allocator.free(python_exe);
     print("🐍 Using Python: {s}\n", .{python_exe});
 
-    // Step 4: Create virtual environment
-    print("📦 Setting up virtual environment...\n", .{});
-    var venv_manager = bundlr.python.venv.VenvManager.init(allocator);
+    // Step 4: Install package from extracted repository
+    print("📋 Installing package from local directory...\n", .{});
+    var uv_installer = bundlr.uv.installer.UvPackageInstaller.init(allocator, uv_exe, venv_dir);
 
-    const venv_dir = venv_manager.create(python_exe, config.project_name, config.python_version) catch |err| blk: {
-        if (err == error.VenvCreationFailed) {
-            // Check if venv already exists
-            const existing_venv = try venv_manager.paths.getVenvDir(config.project_name, config.python_version);
-            defer allocator.free(existing_venv);
+    // GitHub archives extract into a subdirectory (e.g. "repo-branch/"),
+    // so find the inner dir that actually contains pyproject.toml
+    const inner_dir = try findFirstSubdir(allocator, extract_dir);
+    defer if (inner_dir) |d| allocator.free(d);
+    const install_dir = inner_dir orelse extract_dir;
+    print("📂 Installing from: {s}\n", .{install_dir});
 
-            if (venv_manager.isValid(existing_venv)) {
-                print("✅ Using existing virtual environment: {s}\n", .{existing_venv});
-                break :blk try allocator.dupe(u8, existing_venv);
-            } else {
-                print("❌ Failed to create virtual environment\n", .{});
-                return err;
-            }
-        } else {
-            return err;
-        }
-    };
-    defer allocator.free(venv_dir);
-
-    print("✅ Virtual environment ready: {s}\n", .{venv_dir});
+    try uv_installer.installFromPath(install_dir);
+    print("✅ Package installed successfully\n", .{});
 
     // Step 5: Install project package
     print("📋 Installing project package: {s}\n", .{config.project_name});

@@ -278,12 +278,6 @@ pub const DependencyResolver = struct {
             arg_count += 1;
         }
 
-        // Include wheel URLs and hashes
-        if (arg_count < cmd_args.len) {
-            cmd_args[arg_count] = "--generate-hashes";
-            arg_count += 1;
-        }
-
         // Execute the command
         const result = bundlr.platform.process.run(self.allocator, cmd_args[0..arg_count], std.fs.path.dirname(requirements_file).?) catch |err| {
             std.log.err("Failed to run uv pip compile: {}", .{err});
