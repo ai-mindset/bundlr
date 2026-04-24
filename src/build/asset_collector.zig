@@ -319,7 +319,10 @@ pub const AssetCollector = struct {
         else
             "unknown_asset";
 
-        const temp_file = try std.fmt.allocPrint(self.allocator, "/tmp/{s}", .{filename});
+        var paths = bundlr.platform.paths.Paths.init(self.allocator);
+        const system_temp = try paths.getTemporaryDir();
+        defer self.allocator.free(system_temp);
+        const temp_file = try std.fs.path.join(self.allocator, &[_][]const u8{ system_temp, filename });
         defer self.allocator.free(temp_file);
 
         try self.http_client.downloadFile(asset.path, temp_file, bundlr.platform.http.printProgress);
@@ -574,7 +577,12 @@ pub const AssetCollector = struct {
             null;
 
         // Clone into a temp directory
-        const clone_dir = try std.fmt.allocPrint(self.allocator, "/tmp/bundlr_git_{d}", .{std.time.milliTimestamp()});
+        var paths = bundlr.platform.paths.Paths.init(self.allocator);
+        const system_temp = try paths.getTemporaryDir();
+        defer self.allocator.free(system_temp);
+        const dir_name = try std.fmt.allocPrint(self.allocator, "bundlr_git_{d}", .{std.time.milliTimestamp()});
+        defer self.allocator.free(dir_name);
+        const clone_dir = try std.fs.path.join(self.allocator, &[_][]const u8{ system_temp, dir_name });
         errdefer self.allocator.free(clone_dir);
 
         var argv_with_branch = [_][]const u8{ "git", "clone", "--depth", "1", "--branch", branch orelse "", clone_url, clone_dir };
