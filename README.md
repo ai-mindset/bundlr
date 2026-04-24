@@ -1,186 +1,67 @@
-# bundlr 📦
+# bundlr
 
-**Zero-installation Python CLI tool runner.** Execute any Python command-line tool instantly—no pip install, no virtual environments to manage, no dependency conflicts. Just run it.
+**Zero‑installation Python CLI runner** – execute any PyPI package or Git repository instantly without installing anything on the host system.
 
-Bundlr automatically downloads Python, creates isolated environments, installs packages, and executes commands—then cleans up. **Double-click for GUI mode** or use the command line for power users.
+### Quick start
 
-**Perfect for:**
-- 🚀 Testing tools like `black`, `pytest`, or `httpie` without installing
-- 🔧 Running utilities from GitHub repositories instantly
-- 🧪 Trying packages without polluting your system Python
-- 📦 One-off commands without environment setup
-- 🛡️ Safe execution in isolated, temporary environments
+#### GUI mode (double‑click)
+1. Download the appropriate executable from the **Releases** page.
+2. Double‑click to launch the GUI.
+3. Enter a package name (e.g. `cowsay`) and optional arguments.
+4. Watch the tool run in a terminal window.
 
-## 🚀 Quick Start
-
-### GUI Mode (Easiest!)
-1. **Download** bundlr for your platform from [Releases](https://github.com/ai-mindset/bundlr/releases/latest)
-2. **Double-click** the executable
-3. **Enter** a package name (e.g., "cowsay") and arguments
-4. **Watch** bundlr work in a live terminal window!
-
-### Command Line Mode
+#### Command line
 ```bash
-# Execute Python tools instantly
-bundlr cowsay -t "Hello World"          # ASCII art text
-bundlr httpie GET httpbin.org/json      # HTTP client tool
-bundlr black --help                     # Python code formatter
+# Run a PyPI package
+bundlr cowsay -t "Hello World"
 
-# Run from GitHub repositories
+# Run a tool from a Git repository
 bundlr https://github.com/psf/black --help
-bundlr https://github.com/ai-mindset/distil --help
-
-# Create portable executables (Build Mode - Windows only currently)
-bundlr build cowsay --target windows-x86_64   # Windows executable (working)
-bundlr build httpie --target windows-x86_64   # Windows executable (working)
-
-# Launch GUI mode explicitly
-bundlr --gui
 ```
 
-## 🔨 Build Mode: Create Portable Executables
+### Build mode – create portable executables
+> **Status**: Windows binaries are functional. Linux/macOS support is under development 🚧.
 
-> **⚠️ Current Status**: Build mode currently supports **Windows targets only**. Linux and macOS target support is in development.
-
-Bundlr can create **standalone, portable executables** that run anywhere without requiring bundlr to be installed on the target system. Perfect for distributing tools or deploying to servers.
-
-### Features
-- 📦 **Self-contained**: Includes Python runtime + dependencies
-- 🌐 **Cross-platform**: Build for Windows (Linux/macOS support coming soon)
-- ⚡ **Optimised**: Multiple optimisation levels for size vs speed
-- 🚀 **No dependencies**: Generated executables run without installation
-
-### Usage
 ```bash
-# Basic build command
-bundlr build <package> --target <platform>
-
-# Currently supported targets
-bundlr build cowsay --target windows-x86_64                         # ✅ Windows (working)
-
-# In development
-bundlr build cowsay --target linux-x86_64                           # 🚧 Linux (in progress)
-bundlr build cowsay --target macos-x86_64                           # 🚧 macOS Intel (in progress)
-bundlr build cowsay --target macos-aarch64                          # 🚧 macOS Apple Silicon (in progress)
-
-# Build from GitHub repositories
-bundlr build https://github.com/psf/black --target windows-x86_64
-
-# Optimisation levels (optional)
-bundlr build httpie --target windows-x86_64 --optimise-speed          # Faster execution
-bundlr build httpie --target windows-x86_64 --optimise-size           # Smaller binary
-bundlr build httpie --target windows-x86_64 --optimise-compatibility  # Default
+# Build a Windows executable
+bundlr build cowsay --target windows-x86_64
 ```
 
-Generated **self-extracting bundles** (~100-150MB) work on any system without Python/bundlr installed.
+#### What the build produces
+* A **self‑extracting executable** that contains:
+  * A tiny Zig stub (generated from `src/build/bundle_generator.zig`).
+  * The selected Python runtime.
+  * All required wheels and assets.
+  * Metadata describing the bundle.
+* When executed, the stub extracts the bundled data to a temporary directory, sets up the Python environment, and runs the requested entry point.
 
-## 🤔 Why Bundlr?
+### Options (common to both run and build modes)
+* `--help`, `-h` – show help.
+* `--gui` – force GUI mode.
+* Build‑specific flags:
+  * `--target <platform>` – target platform (`windows-x86_64`, `linux-x86_64`, `macos-aarch64`, …).
+  * `--output <file>` – explicit output executable path.
+  * `--output-dir <dir>` – directory for multi‑target builds.
+  * `--python-version <ver>` – Python version to embed (default **3.14**).
+  * `--optimise-size` – minimise binary size.
+  * `--optimise-speed` – maximise runtime speed.
+  * `--optimise-compatibility` – maximise compatibility (default).
+  * `--exclude-dev-deps` – omit development dependencies.
+  * `--entry-point <script>` – custom entry‑point Python code.
 
-**vs. pipx:** No installation required. Bundlr works instantly - no need to install pipx first.
+### Architecture overview
+* **Bundlr core** – Zig binary that orchestrates downloading Python, creating a virtual environment, installing the package, and executing it.
+* **Build pipeline** (`src/build/pipeline.zig`) – resolves dependencies, collects assets, prepares a Python runtime, and invokes the **BundleGenerator**.
+* **BundleGenerator** (`src/build/bundle_generator.zig`) – generates the stub source, compiles it for the target, and appends the bundled archive.
+* **RuntimeEmbedder**, **AssetCollector**, **DependencyResolver**, **GitArchiveManager**, **UvManager** – support modules handling Python runtime, wheels, dependency resolution, and Git archive extraction.
 
-**vs. Docker:** Faster startup, smaller footprint. No container overhead or Docker daemon required.
-
-**vs. pip install:** Zero system pollution. Each run uses a fresh, isolated environment that's automatically cleaned up.
-
-**vs. Git clone + setup:** Skip the clone, virtual environment creation, and dependency installation dance.
-
-**vs. PyInstaller/cx_Freeze:** No need to install Python or packaging tools. Build Windows executables from any platform (cross-platform support expanding).
-
-**Use cases:** Testing tools instantly, creating portable executables, CI/CD deployment, one-off scripts, air-gapped systems.
-
-## 📥 Installation
-
-**Download from [Releases](https://github.com/ai-mindset/bundlr/releases/latest):**
-- **Linux**: `bundlr-linux-x86_64`
-- **macOS**: `bundlr-macos-x86_64` (Intel) or `bundlr-macos-aarch64` (Apple Silicon)
-- **Windows**: `bundlr-windows-x86_64.exe`
-
-### Unix (Linux & macOS)
+### Installation (manual)
 ```bash
-# Make executable and install
-chmod +x bundlr-*
-sudo mv bundlr-* /usr/local/bin/bundlr
-
-# Test it
-bundlr cowsay -t "Hello!"
-```
-
-### Windows
-```cmd
-# Rename for easier use (optional)
-rename bundlr-windows-x86_64.exe bundlr.exe
-
-# Test it
-bundlr cowsay -t "Hello!"
-```
-
-### Build from Source
-```bash
+# Clone and build from source
 git clone https://github.com/ai-mindset/bundlr.git
 cd bundlr && zig build
-# Binary in zig-out/bin/bundlr
+# Executable will be in zig-out/bin/bundlr
 ```
 
-## 🎯 How It Works
-
-**Instant Execution** (`bundlr <package>`): Downloads Python 3.14 (~60MB), creates isolated environment, installs package, executes command. ~10s cold start, ~2s cached.
-
-**Build Mode** (`bundlr build <package> --target <platform>`): Creates optimised Python runtime bundle, collects dependencies, generates self-extracting executable for Windows targets. ~50s with caching optimisations.
-
-- **Security**: Command injection prevention, isolated execution, no system pollution
-- **Architecture**: Single Zig binary, 1GB cache limit, comprehensive testing
-
-## ⚡ Performance & Efficiency
-
-**Optimised Binary**: Bundlr is highly optimised for both size and performance:
-- **Ultra-compact**: 233KB executable (98% smaller than typical builds)
-- **Lightning startup**: <1ms for help/info commands
-- **Memory efficient**: Arena-based allocation optimised for CLI usage patterns
-- **Single-threaded**: No threading overhead for optimal resource usage
-
-**Technical Optimisations**:
-- `ReleaseSmall` compilation with symbol stripping
-- Arena allocator for improved memory management
-- Reduced array sizes and code deduplication
-- Platform-specific optimisations
-
-These optimisations make bundlr perfect for distribution and CI/CD environments where binary size and startup performance matter.
-
-## ⚠️ Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| **"Permission denied"** (Unix) | `chmod +x bundlr-*` |
-| **"Command not found"** | Add to PATH or use `./bundlr-*` |
-| **Python download fails** | Check internet connection (~60MB download) |
-| **GUI doesn't work** | Use CLI mode: `bundlr <package>` |
-
-## ❓ FAQ
-
-**Q: How is this different from pipx?**
-A: Bundlr requires no installation - it's a single executable that automatically downloads Python and manages everything. pipx requires Python to already be installed.
-
-**Q: Is it safe to run unknown packages?**
-A: Yes. Each run uses a fresh, temporary virtual environment created from bundlr's own downloaded Python runtime, so your existing system Python and its global packages are never imported or modified. Bundlr only reads or writes files in its cache and in the locations you explicitly operate on.
-
-**Q: Where are files stored?**
-A: Platform-specific cache directories:
-- Linux: `~/.cache/bundlr`
-- macOS: `~/Library/Caches/bundlr`
-- Windows: `%LOCALAPPDATA%\bundlr`
-
-**Q: Can I use it for CI/CD?**
-A: Absolutely! Perfect for running tools like black, pytest, or custom scripts without setup steps.
-
-**Q: What Python version does it use?**
-A: Python 3.14 by default, configurable via `BUNDLR_PYTHON_VERSION` environment variable.
-
-**Q: How do portable executables work?**
-A: Build mode creates self-extracting bundles (~100-150MB) that include Python runtime and all dependencies. They run on target systems without requiring bundlr or Python to be installed.
-
-**Q: Can I distribute the generated executables?**
-A: Yes! Generated executables are completely standalone and can be distributed freely. Recipients don't need Python, bundlr, or any dependencies installed.
-
-## 📄 License
-
+### License
 MIT
