@@ -652,12 +652,18 @@ pub const BundleGenerator = struct {
             \\        break :blk try std.fmt.allocPrint(allocator,
             \\            \\import sys
             \\            \\import subprocess
-            \\            \\sys.exit(subprocess.call([sys.executable, '-m', '{s}'] + sys.argv[1:]))
+            \\            \\try:
+            \\            \\    sys.exit(subprocess.call([sys.executable, '-m', '{s}'] + sys.argv[1:]))
+            \\            \\except KeyboardInterrupt:
+            \\            \\    sys.exit(0)
             \\        , .{ep});
             \\    } else try std.fmt.allocPrint(allocator,
             \\        \\import sys
             \\        \\import subprocess
-            \\        \\sys.exit(subprocess.call([sys.executable, '-m', '{s}'] + sys.argv[1:]))
+            \\        \\try:
+            \\        \\    sys.exit(subprocess.call([sys.executable, '-m', '{s}'] + sys.argv[1:]))
+            \\        \\except KeyboardInterrupt:
+            \\        \\    sys.exit(0)
             \\    , .{package_name});
             \\    defer allocator.free(python_script);
             \\
