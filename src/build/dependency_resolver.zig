@@ -280,11 +280,11 @@ pub const DependencyResolver = struct {
             }
         }
 
-        // Add optimisation flags
-        if (exclude_dev_deps and arg_count < cmd_args.len) {
-            cmd_args[arg_count] = "--no-deps";
-            arg_count += 1;
-        }
+        // `uv pip compile --no-deps` disables all dependency resolution, which
+        // would drop required transitive dependencies from the generated lock
+        // output. Do not map `exclude_dev_deps` to `--no-deps`; proper dev-only
+        // exclusion requires project/group-aware handling at the input level.
+        _ = exclude_dev_deps;
 
         // Execute the command
         const result = bundlr.platform.process.run(self.allocator, cmd_args[0..arg_count], std.fs.path.dirname(requirements_file).?) catch |err| {
