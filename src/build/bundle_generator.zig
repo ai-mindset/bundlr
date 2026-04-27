@@ -957,7 +957,7 @@ pub const BundleGenerator = struct {
             .bundlr_version = try self.allocator.dupe(u8, options.metadata.bundlr_version),
             .entry_point = if (options.entry_point) |ep| try self.allocator.dupe(u8, ep) else null,
             .included_packages = packages,
-            .compression = try self.allocator.dupe(u8, "xz"),
+            .compression = try self.allocator.dupe(u8, "gzip"),
         };
     }
 
