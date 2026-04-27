@@ -918,47 +918,25 @@ pub const BundleGenerator = struct {
 
     /// Write metadata file
     fn writeMetadataFile(self: *BundleGenerator, metadata_path: []const u8, options: BundleOptions) !void {
-        const source_url_json = if (options.dependencies.source_url) |url|
-            try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{url})
-        else
-            try self.allocator.dupe(u8, "null");
-        defer self.allocator.free(source_url_json);
+        _ = self;
 
-        const entry_point_json = if (options.entry_point) |ep|
-            try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{ep})
-        else
-            try self.allocator.dupe(u8, "null");
-        defer self.allocator.free(entry_point_json);
-
-        const metadata_content = try std.fmt.allocPrint(self.allocator,
-            \\{{
-            \\  "bundle_version": "1.0",
-            \\  "package_name": "{s}",
-            \\  "source_url": {s},
-            \\  "source_branch": "{s}",
-            \\  "python_version": "{s}",
-            \\  "target_platform": "{s}",
-            \\  "build_timestamp": {d},
-            \\  "bundlr_version": "{s}",
-            \\  "entry_point": {s}
-            \\}}
-        , .{
-            options.module_name orelse options.dependencies.root_package,
-            source_url_json,
-            options.metadata.git_branch orelse "main",
-            options.runtime_bundle.metadata.python_version,
-            options.target.toString(),
-            options.metadata.build_time,
-            options.metadata.bundlr_version,
-            entry_point_json,
-        });
-        defer self.allocator.free(metadata_content);
+        const metadata = .{
+            .bundle_version = "1.0",
+            .package_name = options.module_name orelse options.dependencies.root_package,
+            .source_url = options.dependencies.source_url,
+            .source_branch = options.metadata.git_branch orelse "main",
+            .python_version = options.runtime_bundle.metadata.python_version,
+            .target_platform = options.target.toString(),
+            .build_timestamp = options.metadata.build_time,
+            .bundlr_version = options.metadata.bundlr_version,
+            .entry_point = options.entry_point,
+        };
 
         std.debug.print("🔍 writing entry_point: {?s}\n", .{options.entry_point});
 
         const metadata_file = try std.fs.createFileAbsolute(metadata_path, .{});
         defer metadata_file.close();
-        try metadata_file.writeAll(metadata_content);
+        try std.json.stringify(metadata, .{}, metadata_file.writer());
     }
 
     /// Create bundle metadata
