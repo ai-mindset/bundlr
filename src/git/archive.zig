@@ -56,6 +56,13 @@ pub const GitRepositoryInfo = struct {
             url = url[0 .. url.len - 1];
         }
 
+        // Strip /tree/<branch>, /blob/<branch>, /commit/<hash> from URL path
+        inline for ([_][]const u8{ "/tree/", "/blob/", "/commit/" }) |pattern| {
+            if (std.mem.indexOf(u8, url, pattern)) |idx| {
+                url = url[0..idx];
+            }
+        }
+        //
         // Split owner/repo
         const slash_index = std.mem.indexOf(u8, url, "/") orelse return error.InvalidGitHubUrl;
 
@@ -98,7 +105,8 @@ pub const GitRepositoryInfo = struct {
         defer allocator.free(safe_ref);
         for (safe_ref) |*char| {
             if (char.* == '/' or char.* == '\\' or char.* == ':' or char.* == '*' or
-                char.* == '?' or char.* == '"' or char.* == '<' or char.* == '>' or char.* == '|') {
+                char.* == '?' or char.* == '"' or char.* == '<' or char.* == '>' or char.* == '|')
+            {
                 char.* = '_';
             }
         }
@@ -124,7 +132,6 @@ pub const GitArchiveManager = struct {
             .paths = paths_module.Paths.init(allocator),
         };
     }
-
 
     /// Download a Git repository archive
     pub fn downloadRepository(

@@ -8,12 +8,7 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     print("   Launching dialogue interface...\n\n", .{});
 
     // Get package name or repository
-    var package_result = bundlr.gui.dialogues.showInputDialogue(
-        allocator,
-        "Bundlr - Package Runner",
-        "Enter PyPI package or Git URL:",
-        "cowsay"
-    ) catch |err| {
+    var package_result = bundlr.gui.dialogues.showInputDialogue(allocator, "Bundlr - Package Runner", "Enter PyPI package or Git URL:", "cowsay") catch |err| {
         if (err == error.DialogueCancelled) {
             print("📛 Operation cancelled by user\n", .{});
             return;
@@ -29,12 +24,7 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     }
 
     // Get arguments
-    var args_result = bundlr.gui.dialogues.showInputDialogue(
-        allocator,
-        "Bundlr - Arguments",
-        "Enter arguments (optional):",
-        "-t \"Hello from GUI!\""
-    ) catch |err| {
+    var args_result = bundlr.gui.dialogues.showInputDialogue(allocator, "Bundlr - Arguments", "Enter arguments (optional):", "-t \"Hello from GUI!\"") catch |err| {
         if (err == error.DialogueCancelled) {
             print("📛 Operation cancelled by user\n", .{});
             return;
@@ -51,7 +41,7 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     print("\n🚀 Running bundlr...\n\n", .{});
 
     // Parse arguments into fixed array
-    var args_array: [16][]const u8 = undefined; // Support up to 16 arguments
+    var args_array: [8][]const u8 = undefined; // Support up to 8 arguments (reduced memory usage)
     var arg_count: usize = 0;
 
     if (args_result.text.len > 0) {
@@ -65,7 +55,7 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     }
 
     // Build command to execute in terminal window
-    var cmd_args: [32][]const u8 = undefined;
+    var cmd_args: [16][]const u8 = undefined; // Reduced from 32 to 16 for better memory efficiency
     var cmd_count: usize = 0;
 
     // Get the current executable path
@@ -99,17 +89,107 @@ fn runGuiMode(allocator: std.mem.Allocator) !void {
     print("✅ Launched bundlr in terminal window\n", .{});
 }
 
-/// Internal function to run a package (extracted from main logic)
-fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app_args: []const []const u8) !bool {
-    // Auto-detect mode and create configuration
-    const build_config = bundlr.config.BuildConfig{};
-    var config = if (isGitRepository(package_arg))
-        try bundlr.config.createGit(allocator, package_arg, build_config.default_python_version, null)
-    else
-        try bundlr.config.create(allocator, package_arg, "1.0.0", build_config.default_python_version);
-    defer config.deinit();
+/// Build mode - create portable executable from Python package
+fn runBuildMode(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    print("🔨 Bundlr Build Mode\n", .{});
+    print("   Creating portable executable...\n\n", .{});
 
-    // Print bootstrap message based on source mode
+    if (args.len == 0) {
+        print("❌ Error: No package specified for build\n", .{});
+        print("Usage: bundlr build <package> [options]\n", .{});
+        print("Example: bundlr build cowsay --target linux-x86_64 --output cowsay-linux\n", .{});
+        return;
+    }
+
+    // Parse build options from command line arguments
+    const build_options = bundlr.build.pipeline.parseBuildOptions(allocator, args) catch |err| {
+        switch (err) {
+            error.MissingPackageArgument => {
+                print("❌ Error: Package name is required\n", .{});
+                printBuildUsage();
+            },
+            error.UnknownTargetPlatform => {
+                print("❌ Error: Unknown target platform specified\n", .{});
+                print("Supported platforms: linux-x86_64, linux-aarch64, windows-x86_64, windows-aarch64, macos-x86_64, macos-aarch64, all\n", .{});
+            },
+            else => {
+                print("❌ Error parsing build options: {}\n", .{err});
+            },
+        }
+        return;
+    };
+
+    // Clean up allocated build options on exit
+    defer {
+        if (build_options.output_path) |path| allocator.free(path);
+        if (build_options.output_dir) |dir| allocator.free(dir);
+        if (build_options.entry_point) |ep| allocator.free(ep);
+        allocator.free(build_options.package);
+    }
+
+    print("📦 Package: {s}\n", .{build_options.package});
+    print("🎯 Target: {s}\n", .{build_options.target.toString()});
+    print("🐍 Python: {s}\n", .{build_options.python_version});
+    print("⚡ Optimise: {s}\n", .{@tagName(build_options.optimize_level)});
+
+    if (build_options.output_path) |output| {
+        print("📄 Output: {s}\n", .{output});
+    } else if (build_options.output_dir) |dir| {
+        print("📁 Output Dir: {s}\n", .{dir});
+    }
+
+    print("\n", .{});
+
+    // Initialize and execute build pipeline
+    var pipeline = bundlr.build.pipeline.BuildPipeline.init(allocator, build_options);
+
+    print("🔍 entry_point: {?s}\n", .{build_options.entry_point});
+
+    const build_results = pipeline.execute() catch |err| {
+        print("❌ Build failed: {}\n", .{err});
+        return;
+    };
+
+    // Clean up build results
+    defer {
+        for (build_results) |*result| {
+            result.deinit(allocator);
+        }
+        allocator.free(build_results);
+    }
+
+    // Print success summary
+    print("\n🎉 Build completed successfully!\n\n", .{});
+
+    for (build_results) |result| {
+        print("✅ {s}:\n", .{result.target.toString()});
+        print("   📄 File: {s}\n", .{result.executable_path});
+        print("   📏 Size: {} MB\n", .{result.size_bytes / (1024 * 1024)});
+        print("   ⏱️  Time: {}ms\n", .{result.build_duration_ms});
+        print("\n", .{});
+    }
+
+    print("🚀 Your portable executable(s) are ready to run!\n", .{});
+    if (build_results.len == 1) {
+        print("   Try running: {s}\n", .{build_results[0].executable_path});
+    }
+}
+
+/// Helper function to create runtime configuration
+fn createRuntimeConfig(allocator: std.mem.Allocator, package_arg: []const u8) !bundlr.config.RuntimeConfig {
+    const build_config = bundlr.config.BuildConfig{};
+    if (isGitRepository(package_arg)) {
+        const parsed = try parseGitTreeUrl(allocator, package_arg);
+        defer allocator.free(parsed.base_url);
+        defer if (parsed.branch) |b| allocator.free(b);
+        return try bundlr.config.createGit(allocator, parsed.base_url, build_config.default_python_version, parsed.branch);
+    } else {
+        return try bundlr.config.create(allocator, package_arg, "1.0.0", build_config.default_python_version);
+    }
+}
+
+/// Print bootstrap message for configuration
+fn printBootstrapMessage(config: *const bundlr.config.RuntimeConfig) void {
     switch (config.source_mode) {
         .pypi => {
             print("🚀 Bundlr: Bootstrapping {s} v{s} (Python {s})\n", .{
@@ -125,8 +205,18 @@ fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app
             });
         },
     }
+}
 
-    // Run the bootstrap process (same as CLI mode)
+/// Internal function to run a package (extracted from main logic)
+fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app_args: []const []const u8) !bool {
+    // Auto-detect mode and create configuration
+    var config = try createRuntimeConfig(allocator, package_arg);
+    defer config.deinit();
+
+    // Print bootstrap message
+    printBootstrapMessage(&config);
+
+    // Run the bootstrap process
     try bootstrapApplication(allocator, &config, app_args);
 
     return true; // Success
@@ -136,7 +226,9 @@ fn runPackageInternal(allocator: std.mem.Allocator, package_arg: []const u8, app
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     // Parse command line arguments
     const args = try std.process.argsAlloc(allocator);
@@ -150,10 +242,14 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, args[1], "--gui")) {
             try runGuiMode(allocator);
             return;
+        } else if (std.mem.eql(u8, args[1], "build")) {
+            // Handle build command for portable executable generation
+            try runBuildMode(allocator, args[2..]);
+            return;
         }
     }
 
-    // Default behavior: launch GUI if no arguments (double-click behavior)
+    // Default behaviour: launch GUI if no arguments (double-click behaviour)
     if (args.len == 1) {
         try runGuiMode(allocator);
         return;
@@ -166,41 +262,32 @@ pub fn main() !void {
     const app_args = if (args.len > 2) args[2..] else &[_][]const u8{};
 
     // Auto-detect mode and create configuration
-    const build_config = bundlr.config.BuildConfig{};
-    var config = if (isGitRepository(package_arg))
-        try bundlr.config.createGit(allocator, package_arg, build_config.default_python_version, null)
-    else
-        try bundlr.config.create(allocator, package_arg, "1.0.0", build_config.default_python_version);
+    var config = try createRuntimeConfig(allocator, package_arg);
     defer config.deinit();
 
-    // Print bootstrap message based on source mode
-    switch (config.source_mode) {
-        .pypi => {
-            print("🚀 Bundlr: Bootstrapping {s} v{s} (Python {s})\n", .{
-                config.project_name,
-                config.project_version,
-                config.python_version,
-            });
-        },
-        .git => {
-            print("🚀 Bundlr: Bootstrapping from {s} (Python {s})\n", .{
-                config.git_repository.?,
-                config.python_version,
-            });
-        },
-    }
-
-    // Run the bootstrap process
+    // Print bootstrap message and run bootstrap process
+    printBootstrapMessage(&config);
     try bootstrapApplication(allocator, &config, app_args);
 }
 
 /// Detect if a string is a Git repository URL
 fn isGitRepository(package_arg: []const u8) bool {
     return std.mem.startsWith(u8, package_arg, "http://") or
-           std.mem.startsWith(u8, package_arg, "https://") or
-           std.mem.startsWith(u8, package_arg, "git@") or
-           std.mem.indexOf(u8, package_arg, "github.com") != null or
-           std.mem.indexOf(u8, package_arg, "gitlab.com") != null;
+        std.mem.startsWith(u8, package_arg, "https://") or
+        std.mem.startsWith(u8, package_arg, "git@");
+}
+
+/// Extract branch from a GitHub /tree/ URL, returning base repo URL and optional branch
+fn parseGitTreeUrl(allocator: std.mem.Allocator, url: []const u8) !struct { base_url: []u8, branch: ?[]u8 } {
+    // Handle /tree/<branch> URLs for GitHub, Codeberg, or any forge
+    if (std.mem.startsWith(u8, url, "https://") or std.mem.startsWith(u8, url, "http://")) {
+        if (std.mem.indexOf(u8, url, "/tree/")) |idx| {
+            const base = try allocator.dupe(u8, url[0..idx]);
+            const branch = try allocator.dupe(u8, url[idx + "/tree/".len ..]);
+            return .{ .base_url = base, .branch = branch };
+        }
+    }
+    return .{ .base_url = try allocator.dupe(u8, url), .branch = null };
 }
 
 /// Bootstrap and run a Python application
@@ -226,47 +313,29 @@ fn bootstrapPyPiApplication(allocator: std.mem.Allocator, config: *const bundlr.
     defer allocator.free(python_exe);
     print("🐍 Using Python: {s}\n", .{python_exe});
 
-    // Step 4: Create virtual environment
-    print("📦 Setting up virtual environment...\n", .{});
-    var venv_manager = bundlr.python.venv.VenvManager.init(allocator);
+    // Step 3b: Create virtual environment
+    var uv_bootstrap = bundlr.uv.bootstrap.UvManager.init(allocator);
+    const uv_version = try uv_bootstrap.ensureUvInstalled(null);
+    defer allocator.free(uv_version);
+    const uv_exe = try uv_bootstrap.getUvExecutable(uv_version);
+    defer allocator.free(uv_exe);
 
-    const venv_dir = venv_manager.create(python_exe, config.project_name, config.python_version) catch |err| blk: {
-        if (err == error.VenvCreationFailed) {
-            // Check if venv already exists
-            const existing_venv = try venv_manager.paths.getVenvDir(config.project_name, config.python_version);
-            defer allocator.free(existing_venv);
-
-            if (venv_manager.isValid(existing_venv)) {
-                print("✅ Using existing virtual environment: {s}\n", .{existing_venv});
-                break :blk try allocator.dupe(u8, existing_venv);
-            } else {
-                print("❌ Failed to create virtual environment\n", .{});
-                return err;
-            }
-        } else {
-            return err;
-        }
-    };
+    var uv_venv_manager = bundlr.uv.venv.UvVenvManager.init(allocator, uv_exe);
+    const venv_dir = try uv_venv_manager.create(config.project_name, config.python_version);
     defer allocator.free(venv_dir);
 
-    print("✅ Virtual environment ready: {s}\n", .{venv_dir});
-
-    // Step 5: Install project package
+    // Step 4: Install project package using uv
     print("📋 Installing project package: {s}\n", .{config.project_name});
-    const pip_path = try venv_manager.getVenvPip(venv_dir);
-    defer allocator.free(pip_path);
+    var uv_installer = bundlr.uv.installer.UvPackageInstaller.init(allocator, uv_exe, venv_dir);
 
-    var installer = bundlr.python.installer.PackageInstaller.init(allocator, pip_path);
-
-    // Install the project package
-    installer.installPackage(config.project_name) catch |err| {
+    uv_installer.installPackage(config.project_name) catch |err| {
         print("⚠️  Package installation failed: {}\n", .{err});
         print("   This might be expected if the package doesn't exist in PyPI\n", .{});
     };
 
-    // Step 6: Execute the application
+    // Step 5: Execute the application
     print("🎯 Executing application...\n", .{});
-    try executePyPiApplication(allocator, &venv_manager, venv_dir, config, app_args);
+    try executePyPiApplication(allocator, &uv_venv_manager, venv_dir, config, app_args);
 }
 
 /// Bootstrap Git repository application (new workflow)
@@ -330,13 +399,7 @@ fn bootstrapGitApplication(allocator: std.mem.Allocator, config: *const bundlr.c
 }
 
 /// Execute PyPI application using pip virtual environment
-fn executePyPiApplication(
-    allocator: std.mem.Allocator,
-    venv_manager: *bundlr.python.venv.VenvManager,
-    venv_dir: []const u8,
-    config: *const bundlr.config.RuntimeConfig,
-    app_args: []const []const u8
-) !void {
+fn executePyPiApplication(allocator: std.mem.Allocator, venv_manager: *bundlr.uv.venv.UvVenvManager, venv_dir: []const u8, config: *const bundlr.config.RuntimeConfig, app_args: []const []const u8) !void {
     const python_exe = try venv_manager.getVenvPython(venv_dir);
     defer allocator.free(python_exe);
 
@@ -344,20 +407,18 @@ fn executePyPiApplication(
 }
 
 /// Execute Git application using uv virtual environment
-fn executeGitApplication(
-    allocator: std.mem.Allocator,
-    uv_venv_manager: *bundlr.uv.venv.UvVenvManager,
-    venv_dir: []const u8,
-    extract_dir: []const u8,
-    config: *const bundlr.config.RuntimeConfig,
-    app_args: []const []const u8
-) !void {
+fn executeGitApplication(allocator: std.mem.Allocator, uv_venv_manager: *bundlr.uv.venv.UvVenvManager, venv_dir: []const u8, extract_dir: []const u8, config: *const bundlr.config.RuntimeConfig, app_args: []const []const u8) !void {
     // For Git repositories, try to extract the package name from the repository
     var actual_package_name: ?[]u8 = null;
     defer if (actual_package_name) |name| allocator.free(name);
 
     // Try to determine the package name from the Git repository URL
     if (config.git_repository) |repo_url| {
+        // Discover the real Python module name from the extracted repo
+        const discovered_module = discoverModuleInDir(allocator, extract_dir) catch null;
+        print("🔍 extract_dir: {s}\n", .{extract_dir});
+        print("🔍 discovered_module: {?s}\n", .{discovered_module});
+        defer if (discovered_module) |m| allocator.free(m);
         // Extract repo name from URL (e.g., "https://github.com/astral-sh/ruff" -> "ruff")
         const repo_name = blk: {
             const last_slash = std.mem.lastIndexOf(u8, repo_url, "/") orelse break :blk null;
@@ -372,7 +433,7 @@ fn executeGitApplication(
         };
 
         if (repo_name) |name| {
-            actual_package_name = try allocator.dupe(u8, name);
+            actual_package_name = try allocator.dupe(u8, discovered_module orelse name);
 
             // Try running as entry point command first
             if (tryRunEntryPoint(allocator, venv_dir, extract_dir, name, app_args)) {
@@ -398,13 +459,7 @@ fn executeGitApplication(
 }
 
 /// Try to run an application using its entry point command
-fn tryRunEntryPoint(
-    allocator: std.mem.Allocator,
-    venv_dir: []const u8,
-    working_dir: []const u8,
-    package_name: []const u8,
-    app_args: []const []const u8
-) !void {
+fn tryRunEntryPoint(allocator: std.mem.Allocator, venv_dir: []const u8, working_dir: []const u8, package_name: []const u8, app_args: []const []const u8) !void {
     // Build path to the entry point executable in venv/bin/
     const platform = @import("builtin").os.tag;
     const bin_dir = switch (platform) {
@@ -419,10 +474,11 @@ fn tryRunEntryPoint(
     std.fs.accessAbsolute(entry_point_path, .{}) catch return error.EntryPointNotFound;
 
     // Build command arguments
-    var cmd_args: [32][]const u8 = undefined; // Fixed size array
+    var cmd_args: [16][]const u8 = undefined; // Fixed size array
     var arg_count: usize = 0;
 
-    cmd_args[arg_count] = entry_point_path; arg_count += 1;
+    cmd_args[arg_count] = entry_point_path;
+    arg_count += 1;
 
     // Add application arguments
     for (app_args) |arg| {
@@ -452,28 +508,28 @@ fn tryExecuteEntryPoint(allocator: std.mem.Allocator, working_dir: []const u8, a
 }
 
 /// Common execution logic for both PyPI and Git applications
-fn executeWithPython(
-    allocator: std.mem.Allocator,
-    python_exe: []const u8,
-    working_dir: []const u8,
-    config: *const bundlr.config.RuntimeConfig,
-    app_args: []const []const u8
-) !void {
+fn executeWithPython(allocator: std.mem.Allocator, python_exe: []const u8, working_dir: []const u8, config: *const bundlr.config.RuntimeConfig, app_args: []const []const u8) !void {
     // Build command arguments
-    var cmd_args: [32][]const u8 = undefined; // Fixed size array
+    var cmd_args: [16][]const u8 = undefined; // Fixed size array
     var arg_count: usize = 0;
 
     // Try different execution methods
     if (config.entry_point) |entry_point| {
         // Use specified entry point
-        cmd_args[arg_count] = python_exe; arg_count += 1;
-        cmd_args[arg_count] = "-c"; arg_count += 1;
-        cmd_args[arg_count] = entry_point; arg_count += 1;
+        cmd_args[arg_count] = python_exe;
+        arg_count += 1;
+        cmd_args[arg_count] = "-c";
+        arg_count += 1;
+        cmd_args[arg_count] = entry_point;
+        arg_count += 1;
     } else {
         // Try to run as module
-        cmd_args[arg_count] = python_exe; arg_count += 1;
-        cmd_args[arg_count] = "-m"; arg_count += 1;
-        cmd_args[arg_count] = config.project_name; arg_count += 1;
+        cmd_args[arg_count] = python_exe;
+        arg_count += 1;
+        cmd_args[arg_count] = "-m";
+        arg_count += 1;
+        cmd_args[arg_count] = config.project_name;
+        arg_count += 1;
     }
 
     // Add application arguments
@@ -497,24 +553,89 @@ fn executeWithPython(
     }
 }
 
+/// Scan an extracted repo for the real Python module name
+/// by looking for directories containing __main__.py
+fn discoverModuleInDir(allocator: std.mem.Allocator, repo_dir: []const u8) !?[]const u8 {
+    // GitHub archives extract to a subdirectory like "repo-main/"
+    // Find it first
+    const inner_dir = try findFirstSubdir(allocator, repo_dir);
+    defer if (inner_dir) |d| allocator.free(d);
+    const base = inner_dir orelse repo_dir;
+
+    // Try src layout first (PEP 621 convention)
+    if (try scanDirForMainModule(allocator, base, "src")) |name| return name;
+    // Then flat layout
+    if (try scanDirForMainModule(allocator, base, null)) |name| return name;
+    return null;
+}
+
+fn findFirstSubdir(allocator: std.mem.Allocator, dir_path: []const u8) !?[]const u8 {
+    var dir = std.fs.openDirAbsolute(dir_path, .{ .iterate = true }) catch return null;
+    defer dir.close();
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        if (entry.kind == .directory and entry.name[0] != '.') {
+            return try std.fs.path.join(allocator, &.{ dir_path, entry.name });
+        }
+    }
+    return null;
+}
+
+fn scanDirForMainModule(allocator: std.mem.Allocator, base_dir: []const u8, sub_dir: ?[]const u8) !?[]const u8 {
+    const search_path = if (sub_dir) |sd|
+        try std.fs.path.join(allocator, &.{ base_dir, sd })
+    else
+        try allocator.dupe(u8, base_dir);
+    defer allocator.free(search_path);
+
+    var dir = std.fs.openDirAbsolute(search_path, .{ .iterate = true }) catch return null;
+    defer dir.close();
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        if (entry.kind != .directory) continue;
+        if (entry.name[0] == '.' or std.mem.eql(u8, entry.name, "__pycache__")) continue;
+
+        const main_path = try std.fs.path.join(allocator, &.{ search_path, entry.name, "__main__.py" });
+        defer allocator.free(main_path);
+
+        std.fs.accessAbsolute(main_path, .{}) catch continue;
+        return try allocator.dupe(u8, entry.name);
+    }
+    return null;
+}
+
 /// Print usage information
 fn printUsage(program_name: []const u8) void {
     print("bundlr - Execute Python packages from PyPI or Git repositories\n", .{});
+    print("         Create portable executables for cross-platform distribution\n", .{});
 
     print("\nUSAGE:\n", .{});
     print("  {s}                                   # GUI mode (default)\n", .{program_name});
     print("  {s} <package> [args...]               # Run PyPI package\n", .{program_name});
     print("  {s} <repository> [args...]            # Run from Git repository\n", .{program_name});
+    print("  {s} build <package> [options...]      # Create portable executable\n", .{program_name});
 
     print("\nEXAMPLES:\n", .{});
     print("  {s} cowsay \"Hello World\"              # PyPI package with arguments\n", .{program_name});
     print("  {s} httpie GET httpbin.org/json        # HTTP client tool\n", .{program_name});
     print("  {s} youtube-dl --help                  # Show package help\n", .{program_name});
     print("  {s} https://github.com/psf/black       # Git repository\n", .{program_name});
+    print("  {s} build cowsay --target linux-x86_64 # Create portable executable\n", .{program_name});
+    print("  {s} build httpie --target all --output-dir dist/ # Multi-platform build\n", .{program_name});
 
     print("\nOPTIONS:\n", .{});
     print("  -h, --help              Show this help message\n", .{});
     print("      --gui               Launch GUI mode explicitly\n", .{});
+
+    print("\nBUILD OPTIONS:\n", .{});
+    print("  --target <platform>     Target platform (linux-x86_64, windows-x86_64, macos-aarch64, all)\n", .{});
+    print("  --output <file>         Output file path\n", .{});
+    print("  --output-dir <dir>      Output directory for multiple targets\n", .{});
+    print("  --python-version <ver>  Python version to embed (default: 3.14)\n", .{});
+    print("  --optimise-size         Optimise for smaller executable size\n", .{});
+    print("  --optimise-speed        Optimise for faster runtime performance\n", .{});
+    print("  --exclude-dev-deps      Exclude development dependencies\n", .{});
+    print("  --entry-point <script>  Custom entry point script\n", .{});
 
     print("\nENVIRONMENT:\n", .{});
     print("  BUNDLR_PYTHON_VERSION   Python version (default: 3.14)\n", .{});
@@ -522,7 +643,33 @@ fn printUsage(program_name: []const u8) void {
     print("  BUNDLR_CACHE_DIR        Custom cache directory\n", .{});
 
     print("\nBundlr automatically manages Python distributions, virtual environments,\n", .{});
-    print("and package installations for seamless execution.\n", .{});
+    print("and package installations for seamless execution and distribution.\n", .{});
+}
+
+/// Print build-specific usage information
+fn printBuildUsage() void {
+    print("\nBUILD USAGE:\n", .{});
+    print("  bundlr build <package> [options...]\n", .{});
+
+    print("\nBUILD OPTIONS:\n", .{});
+    print("  --target <platform>     Target platform to build for\n", .{});
+    print("    Platforms: linux-x86_64, linux-aarch64, windows-x86_64,\n", .{});
+    print("               windows-aarch64, macos-x86_64, macos-aarch64, all\n", .{});
+    print("  --output <file>         Output executable file path\n", .{});
+    print("  --output-dir <dir>      Directory for multiple target outputs\n", .{});
+    print("  --python-version <ver>  Python version to embed (default: 3.14)\n", .{});
+    print("  --optimise-size         Minimise executable size\n", .{});
+    print("  --optimise-speed        Maximise runtime performance\n", .{});
+    print("  --optimise-compatibility Maximum compatibility\n", .{});
+    print("  --exclude-dev-deps      Skip development dependencies\n", .{});
+    print("  --entry-point <script>  Custom entry point code\n", .{});
+
+    print("\nBUILD EXAMPLES:\n", .{});
+    print("  bundlr build cowsay                           # Build for current platform\n", .{});
+    print("  bundlr build cowsay --target linux-x86_64     # Linux 64-bit build\n", .{});
+    print("  bundlr build cowsay --target all --output-dir dist/ # All platforms\n", .{});
+    print("  bundlr build httpie --optimise-size           # Size-optimised build\n", .{});
+    print("  bundlr build https://github.com/user/pkg      # From Git repository\n", .{});
 }
 
 test "bundlr config integration" {

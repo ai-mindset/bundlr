@@ -107,9 +107,83 @@ pub fn extractUsingSystemTools(
     }
 }
 
-/// Extract tar.gz using system tar command
+/// Extract tar.gz using system tar command or Windows alternatives
 fn extractTarGzWithSystemTar(allocator: std.mem.Allocator, target_dir: []const u8, archive_path: []const u8) !void {
+    switch (builtin.os.tag) {
+        .windows => {
+            // On Windows, try tar first (available on Windows 10+), then fall back to PowerShell
+            const tar_result = extractWithWindowsTar(allocator, target_dir, archive_path) catch |err| blk: {
+                if (err == error.FileNotFound) {
+                    // tar not available, try PowerShell (treat tar.gz as zip for compatibility)
+                    break :blk extractWithWindowsPowerShell(allocator, target_dir, archive_path);
+                }
+                return err;
+            };
+
+            _ = tar_result; // Suppress unused variable warning if tar succeeds
+        },
+        else => {
+            // Unix-like systems: use tar directly
+            const args = [_][]const u8{ "tar", "-xzf", archive_path, "-C", target_dir };
+
+            var process = std.process.Child.init(&args, allocator);
+            const result = try process.spawnAndWait();
+
+            switch (result) {
+                .Exited => |code| {
+                    if (code != 0) {
+                        return error.ExtractionFailed;
+                    }
+                },
+                else => return error.ExtractionFailed,
+            }
+        },
+    }
+}
+
+/// Extract using Windows tar command (Windows 10 version 1803+)
+fn extractWithWindowsTar(allocator: std.mem.Allocator, target_dir: []const u8, archive_path: []const u8) !void {
     const args = [_][]const u8{ "tar", "-xzf", archive_path, "-C", target_dir };
+
+    var process = std.process.Child.init(&args, allocator);
+    const result = process.spawnAndWait() catch |err| {
+        if (err == error.FileNotFound) {
+            return error.FileNotFound; // tar not available
+        }
+        return err;
+    };
+
+    switch (result) {
+        .Exited => |code| {
+            if (code != 0) {
+                return error.ExtractionFailed;
+            }
+        },
+        else => return error.ExtractionFailed,
+    }
+}
+
+/// Extract using Windows PowerShell as fallback
+fn extractWithWindowsPowerShell(allocator: std.mem.Allocator, target_dir: []const u8, archive_path: []const u8) !void {
+    // Ensure target directory exists
+    var paths = paths_module.Paths.init(allocator);
+    try paths.ensureDirExists(target_dir);
+
+    // Use PowerShell Expand-Archive (treating tar.gz as zip)
+    const command = try std.fmt.allocPrint(
+        allocator,
+        "& {{Expand-Archive -LiteralPath '{s}' -DestinationPath '{s}' -Force}}",
+        .{ archive_path, target_dir },
+    );
+    defer allocator.free(command);
+
+    const args = [_][]const u8{
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-Command",
+        command,
+    };
 
     var process = std.process.Child.init(&args, allocator);
     const result = try process.spawnAndWait();
