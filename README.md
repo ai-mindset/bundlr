@@ -1,4 +1,4 @@
-# bundlr
+# bundlr 📦
 
 **Zero-installation Python CLI runner** — run any PyPI package or GitHub/Codeberg/GitLab repository instantly, with no host-side installation required.
 
