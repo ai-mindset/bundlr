@@ -272,7 +272,7 @@ pub const DependencyResolver = struct {
         // Add platform specification
         const platform_tag = self.getPlatformTag(target);
         if (platform_tag) |tag| {
-            if (arg_count + 2 < cmd_args.len) {
+            if (arg_count + 2 <= cmd_args.len) { // Ensure we have space for platform args
                 cmd_args[arg_count] = "--python-platform";
                 arg_count += 1;
                 cmd_args[arg_count] = tag;
