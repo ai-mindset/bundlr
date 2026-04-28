@@ -1,26 +1,27 @@
 # bundlr
 
-**Zero‑installation Python CLI runner** – execute any PyPI package or GitHub repository instantly without installing anything on the host system.
+**Zero-installation Python CLI runner** — run any PyPI package or GitHub/Codeberg/GitLab repository instantly, with no host-side installation required.
 
-### Quick start
+## Quick start
 
-#### GUI mode (double‑click)
+### GUI mode (double-click)
 1. Download the appropriate executable from the **Releases** page.
-2. Double‑click to launch the GUI.
-3. Enter a PyPI package name or GitHub URL (e.g. `cowsay`) and optional arguments.
-4. Watch the tool run in a terminal window.
+2. Double-click to launch the GUI.
+3. Enter a PyPI package name or Git URL (e.g. `cowsay`) and optional arguments.
 
-#### Command line
+### Command line
 ```bash
 # Run a PyPI package
 bundlr cowsay -t "Hello World"
 
-# Run a tool from a GitHub repository
+# Run from a Git repository
 bundlr https://github.com/psf/black --help
+bundlr https://codeberg.org/user/repo
 ```
 
-### Build mode – create portable executables
-> **Status**: Windows binaries are functional. Linux/macOS support is under development 🚧.
+## Build mode — create portable executables
+
+> **Status**: Windows executables are functional. Linux/macOS build support is in active development 🚧.
 
 ```bash
 # Build for the default target (linux-x86_64)
@@ -30,29 +31,24 @@ bundlr build cowsay
 bundlr build cowsay --target windows-x86_64
 ```
 
-#### What the build produces
-* A **self‑extracting executable** that contains:
-  * A tiny Zig stub (generated from `src/build/bundle_generator.zig`).
-  * The selected Python runtime.
-  * All required wheels and assets.
-  * Metadata describing the bundle.
-* When executed, the stub extracts the bundled data to a temporary directory, sets up the Python environment, and runs the requested entry point.
+The produced executable is self-extracting: it contains a Zig stub, a Python runtime, all required wheels, and bundle metadata. On first run the stub extracts everything to a temporary directory, sets up the environment, and launches the entry point.
 
-### Options (common to both run and build modes)
-* `--help`, `-h` – show help.
-* `--gui` – force GUI mode.
-* Build‑specific flags:
-  * `--target <platform>` – target platform (`windows-x86_64`, `linux-x86_64`, `macos-aarch64`, …). Default: `linux-x86_64`.
-  * `--output <file>` – explicit output executable path.
-  * `--output-dir <dir>` – directory for multi‑target builds.
-  * `--python-version <ver>` – Python version to embed (default **3.14**).
-  * `--optimise-size` – minimise binary size.
-  * `--optimise-speed` – maximise runtime speed.
-  * `--optimise-compatibility` – maximise compatibility.
-  * `--exclude-dev-deps` – omit development dependencies.
-  * `--entry-point <script>` – custom entry‑point Python code.
+### Build options
 
-### Environment variables
+| Flag | Description |
+|---|---|
+| `--target <platform>` | Target platform (`windows-x86_64`, `linux-x86_64`, `macos-aarch64`, …). Default: `linux-x86_64` |
+| `--output <file>` | Explicit output path |
+| `--output-dir <dir>` | Directory for multi-target builds |
+| `--python-version <ver>` | Python version to embed (default: **3.14**) |
+| `--optimise-size` | Minimise binary size |
+| `--optimise-speed` | Maximise runtime speed |
+| `--optimise-compatibility` | Maximise compatibility |
+| `--exclude-dev-deps` | Omit development dependencies |
+| `--entry-point <script>` | Custom entry-point Python code |
+
+## Environment variables
+
 | Variable | Default | Description |
 |---|---|---|
 | `BUNDLR_PYTHON_VERSION` | `3.14` | Python version to use |
@@ -64,24 +60,33 @@ bundlr build cowsay --target windows-x86_64
 | `BUNDLR_GIT_COMMIT` | — | Git commit hash to use |
 | `BUNDLR_FORCE_REINSTALL` | `false` | Force reinstallation |
 
-### Architecture overview
-* **Bundlr core** – Zig binary that orchestrates downloading Python, creating a virtual environment, installing the package, and executing it.
-* **Build pipeline** (`src/build/pipeline.zig`) – resolves dependencies, collects assets, prepares a Python runtime, and invokes the **BundleGenerator**.
-* **BundleGenerator** (`src/build/bundle_generator.zig`) – generates the stub source, compiles it for the target, and appends the bundled archive.
-* **RuntimeEmbedder**, **AssetCollector**, **DependencyResolver** – build support modules handling Python runtime embedding, wheel collection, and dependency resolution.
-* **GitArchiveManager** (`src/git/archive.zig`) – downloads and extracts GitHub repository archives (no `git` binary required).
-* **DistributionManager** (`src/python/distribution.zig`) – manages Python standalone distribution downloads and caching.
-* **UvManager** (`src/uv/bootstrap.zig`) – bootstraps and manages the `uv` package manager for fast virtual environment creation and package installation.
+## Build from source
 
-> **Note:** Git repository support currently targets **GitHub** only. GitLab and Codeberg support is planned.
+Requires [Zig](https://ziglang.org/).
 
-### Installation (manual)
 ```bash
-# Clone and build from source
 git clone https://github.com/ai-mindset/bundlr.git
 cd bundlr && zig build
-# Executable will be in zig-out/bin/bundlr
+# Executable: zig-out/bin/bundlr
 ```
 
-### License
+## Architecture
+
+| Module | File | Role |
+|---|---|---|
+| Core | `src/main.zig` | CLI entry point, dispatch |
+| Config | `src/config.zig` | Flags, env vars, defaults |
+| Build pipeline | `src/build/pipeline.zig` | Orchestrates dependency resolution, asset collection, runtime embedding |
+| Bundle generator | `src/build/bundle_generator.zig` | Compiles Zig stub, appends bundle archive |
+| Dependency resolver | `src/build/dependency_resolver.zig` | Resolves and downloads wheels |
+| Runtime embedder | `src/build/runtime_embedder.zig` | Embeds Python standalone distribution |
+| Asset collector | `src/build/asset_collector.zig` | Collects wheels and assets |
+| uv manager | `src/uv/bootstrap.zig` | Bootstraps and manages `uv` |
+| Git archive | `src/git/archive.zig` | Downloads/extracts GitHub, Codeberg, GitLab archives (no `git` binary needed) |
+| Python distribution | `src/python/distribution.zig` | Downloads and caches Python standalone builds |
+| GUI | `src/gui/simple_dialogues.zig` | Cross-platform interactive GUI |
+| Platform utilities | `src/platform/` | HTTP, path, process helpers |
+
+## License
+
 MIT
