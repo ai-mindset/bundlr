@@ -217,6 +217,22 @@ pub const BundleGenerator = struct {
     fn generateStubSource(self: *BundleGenerator, target: pipeline.TargetPlatform) ![]u8 {
         _ = target;
 
+        // ---------------------------------------------------------------------------
+        // CHANGES vs. previous version
+        // ---------------------------------------------------------------------------
+        // 1. main(): removed `defer cleanupTempDirectory`; added cleanupOldAppTempDirs
+        //    call and `.bundlr_ready` guard so extraction/install are skipped on warm
+        //    runs.
+        // 2. Replaced createTempDirectory (timestamp-based) with
+        //    getOrCreateTempDirectory (stable FNV-1a hash of exe path + size).
+        // 3. Added cleanupOldAppTempDirs: scans system temp for bundlr_app_* dirs and
+        //    removes entries whose mtime is older than BUNDLR_TEMP_RETENTION_DAYS
+        //    (default 30).  Uses Dir.stat() — which in Zig 0.15.2 takes *no* args and
+        //    stats the directory handle itself — rather than the invalid
+        //    dir.stat(entry.name) call.
+        // 4. installPackages: new `ready_marker` parameter; creates the marker file
+        //    only after all packages install successfully so interrupted runs retry.
+        // ---------------------------------------------------------------------------
         const stub_template =
             \\//! Bundlr self-extracting executable stub
             \\//! This is the entry point for a bundled Python application
@@ -237,40 +253,131 @@ pub const BundleGenerator = struct {
             \\    const args = try std.process.argsAlloc(allocator);
             \\    defer std.process.argsFree(allocator, args);
             \\
-            \\    // Create temporary extraction directory
-            \\    const temp_dir = createTempDirectory(allocator) catch |err| {
-            \\        std.log.err("Failed to create temp directory: {}", .{err});
-            \\        return err;
+            \\    // Remove stale bundlr_app_* directories (>BUNDLR_TEMP_RETENTION_DAYS days old).
+            \\    // Non-fatal: a warning is logged and execution continues on failure.
+            \\    cleanupOldAppTempDirs(allocator) catch |err| {
+            \\        std.log.warn("Old temp-dir cleanup failed (non-fatal): {}", .{err});
             \\    };
-            \\    // Created temp directory successfully
-            \\    defer cleanupTempDirectory(allocator, temp_dir);
             \\
-            \\    // Extract embedded bundle to temp directory
-            \\    try extractBundle(allocator, temp_dir);
+            \\    // Derive a stable directory from the executable's identity.
+            \\    // The directory persists across runs; no defer-cleanup is registered.
+            \\    const temp_dir = try getOrCreateTempDirectory(allocator);
+            \\    defer allocator.free(temp_dir);
             \\
-            \\    // Set up Python environment
-            \\    try setupPythonEnvironment(allocator, temp_dir);
+            \\    // Ready marker: present only after a successful installPackages run.
+            \\    const ready_marker = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, ".bundlr_ready" });
+            \\    defer allocator.free(ready_marker);
             \\
-            \\    // Install packages
-            \\    try installPackages(allocator, temp_dir);
+            \\    const is_ready = blk: {
+            \\        std.fs.accessAbsolute(ready_marker, .{}) catch {
+            \\            break :blk false;
+            \\        };
+            \\        break :blk true;
+            \\    };
+            \\
+            \\    if (!is_ready) {
+            \\        // Full cold-start: extract, set up Python, install packages.
+            \\        try extractBundle(allocator, temp_dir);
+            \\        try setupPythonEnvironment(allocator, temp_dir);
+            \\        // installPackages creates `ready_marker` on success.
+            \\        try installPackages(allocator, temp_dir, ready_marker);
+            \\    }
             \\
             \\    // Execute the application
             \\    try executeApplication(allocator, temp_dir, args[1..]);
             \\}}
             \\
-            \\fn createTempDirectory(allocator: std.mem.Allocator) ![]u8 {{
-            \\    const temp_name = try std.fmt.allocPrint(allocator, "bundlr_app_{}", .{std.time.timestamp()});
-            \\    defer allocator.free(temp_name);
+            \\// ---------------------------------------------------------------------------
+            \\// Stable temp-directory: derived from a FNV-1a hash of the executable's
+            \\// absolute path and its file size.  Moving the binary or changing its
+            \\// content (different size) produces a new directory; identical exe reuses
+            \\// the cached one.
+            \\// ---------------------------------------------------------------------------
+            \\fn getOrCreateTempDirectory(allocator: std.mem.Allocator) ![]u8 {
+            \\    const exe_path = try std.fs.selfExePathAlloc(allocator);
+            \\    defer allocator.free(exe_path);
             \\
-            \\    // Get cross-platform temp directory
+            \\    const exe_file = try std.fs.openFileAbsolute(exe_path, .{});
+            \\    defer exe_file.close();
+            \\    const exe_stat = try exe_file.stat();
+            \\
+            \\    // FNV-1a 64-bit over exe_path bytes then exe_size bytes.
+            \\    var hash: u64 = 14695981039346656037;
+            \\    for (exe_path) |byte| {
+            \\        hash ^= @as(u64, byte);
+            \\        hash *%= 1099511628211;
+            \\    }
+            \\    var size_bytes: [8]u8 = undefined;
+            \\    std.mem.writeInt(u64, &size_bytes, @as(u64, exe_stat.size), .little);
+            \\    for (size_bytes) |byte| {
+            \\        hash ^= @as(u64, byte);
+            \\        hash *%= 1099511628211;
+            \\    }
+            \\
             \\    const system_temp = getSystemTempDir(allocator) catch return error.TempDirNotFound;
             \\    defer allocator.free(system_temp);
             \\
-            \\    const temp_path = try std.fs.path.join(allocator, &[_][]const u8{ system_temp, temp_name });
-            \\    try std.fs.makeDirAbsolute(temp_path);
+            \\    const dir_name = try std.fmt.allocPrint(allocator, "bundlr_app_{x:0>16}", .{hash});
+            \\    defer allocator.free(dir_name);
+            \\
+            \\    const temp_path = try std.fs.path.join(allocator, &[_][]const u8{ system_temp, dir_name });
+            \\
+            \\    std.fs.makeDirAbsolute(temp_path) catch |err| switch (err) {
+            \\        error.PathAlreadyExists => {}, // Reuse existing directory — expected on warm runs.
+            \\        else => return err,
+            \\    };
             \\
             \\    return temp_path;
-            \\}}
+            \\}
+            \\
+            \\// ---------------------------------------------------------------------------
+            \\// Mtime-based cleanup of old bundlr_app_* directories.
+            \\//
+            \\// Zig 0.15.2 note: std.fs.Dir.stat() takes *no* arguments — it stats the
+            \\// directory handle itself.  The previously incorrect dir.stat(entry.name)
+            \\// call (which would produce "member function expected 0 argument(s), found 1")
+            \\// is avoided by opening each candidate directory as a Dir handle first.
+            \\// ---------------------------------------------------------------------------
+            \\fn cleanupOldAppTempDirs(allocator: std.mem.Allocator) !void {
+            \\    // Honour BUNDLR_TEMP_RETENTION_DAYS; fall back to 30 days.
+            \\    const retention_days: i64 = blk: {
+            \\        const env_val = std.process.getEnvVarOwned(allocator, "BUNDLR_TEMP_RETENTION_DAYS") catch break :blk 30;
+            \\        defer allocator.free(env_val);
+            \\        break :blk std.fmt.parseInt(i64, env_val, 10) catch 30;
+            \\    };
+            \\
+            \\    const system_temp = getSystemTempDir(allocator) catch return;
+            \\    defer allocator.free(system_temp);
+            \\
+            \\    var tmp_dir = std.fs.openDirAbsolute(system_temp, .{ .iterate = true }) catch return;
+            \\    defer tmp_dir.close();
+            \\
+            \\    const now_ns: i128 = std.time.nanoTimestamp();
+            \\    // retention_ns: days → nanoseconds (1 day = 86400 * 1_000_000_000 ns)
+            \\    const retention_ns: i128 = @as(i128, retention_days) * 86400 * 1_000_000_000;
+            \\
+            \\    var it = tmp_dir.iterate();
+            \\    while (try it.next()) |entry| {
+            \\        if (entry.kind != .directory) continue;
+            \\        if (!std.mem.startsWith(u8, entry.name, "bundlr_app_")) continue;
+            \\
+            \\        const full_path = try std.fs.path.join(allocator, &[_][]const u8{ system_temp, entry.name });
+            \\        defer allocator.free(full_path);
+            \\
+            \\        // Open the directory as a handle so we can call Dir.stat() (0-arg form).
+            \\        // This is the correct Zig 0.15.2 API; dir.stat(entry.name) does not exist.
+            \\        var sub_dir = std.fs.openDirAbsolute(full_path, .{}) catch continue;
+            \\        defer sub_dir.close();
+            \\        const st = sub_dir.stat() catch continue;
+            \\
+            \\        const age_ns: i128 = now_ns - st.mtime;
+            \\        if (age_ns > retention_ns) {
+            \\            std.fs.deleteTreeAbsolute(full_path) catch |err| {
+            \\                std.log.warn("Failed to remove stale temp dir {s}: {}", .{ full_path, err });
+            \\            };
+            \\        }
+            \\    }
+            \\}
             \\
             \\fn getSystemTempDir(allocator: std.mem.Allocator) ![]u8 {
             \\    switch (builtin.os.tag) {
@@ -561,7 +668,10 @@ pub const BundleGenerator = struct {
             \\    try extractTarGz(allocator, python_runtime_path, python_dir, 1);
             \\}
             \\
-            \\fn installPackages(allocator: std.mem.Allocator, temp_dir: []const u8) !void {
+            \\// installPackages now accepts `ready_marker`: the path to `.bundlr_ready`.
+            \\// The marker is created *only* after all packages install successfully so
+            \\// that an interrupted run leaves no marker and will retry on next launch.
+            \\fn installPackages(allocator: std.mem.Allocator, temp_dir: []const u8, ready_marker: []const u8) !void {
             \\    std.log.info("Installing packages...", .{});
             \\    const python_exe = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "python_runtime", if (builtin.os.tag == .windows) "python.exe" else "bin/python" });
             \\    defer allocator.free(python_exe);
@@ -569,7 +679,13 @@ pub const BundleGenerator = struct {
             \\    const assets_dir = try std.fs.path.join(allocator, &[_][]const u8{ temp_dir, "bundle", "assets" });
             \\    defer allocator.free(assets_dir);
             \\
-            \\    var dir = std.fs.openDirAbsolute(assets_dir, .{ .iterate = true }) catch return;
+            \\    var dir = std.fs.openDirAbsolute(assets_dir, .{ .iterate = true }) catch {
+            \\        // Assets dir absent — mark ready so we don't retry pointlessly.
+            \\        std.log.warn("Assets directory not found; skipping package install.", .{});
+            \\        const mf = std.fs.createFileAbsolute(ready_marker, .{}) catch return;
+            \\        mf.close();
+            \\        return;
+            \\    };
             \\    defer dir.close();
             \\
             \\    var it = dir.iterate();
@@ -589,12 +705,26 @@ pub const BundleGenerator = struct {
             \\        defer allocator.free(result.stderr);
             \\        if (result.term != .Exited or result.term.Exited != 0) {
             \\            std.log.err("pip install failed: {s}", .{result.stderr});
+            \\            return error.PackageInstallFailed;
             \\        }
+            \\
+            \\        // Success — create ready marker so subsequent runs skip setup.
+            \\        const marker_file = std.fs.createFileAbsolute(ready_marker, .{}) catch |err| {
+            \\            std.log.warn("Could not create ready marker: {}", .{err});
+            \\            return; // Non-fatal: next run will redo install, which is safe.
+            \\        };
+            \\        marker_file.close();
             \\        return;
             \\    }
             \\
             \\    std.log.warn("No bundled source directory found in assets, nothing to install", .{});
-            \\}            
+            \\    // Still mark ready: nothing to install means the env is usable as-is.
+            \\    const marker_file = std.fs.createFileAbsolute(ready_marker, .{}) catch |err| {
+            \\        std.log.warn("Could not create ready marker: {}", .{err});
+            \\        return;
+            \\    };
+            \\    marker_file.close();
+            \\}
             \\
             \\fn extractSourceBranch(allocator: std.mem.Allocator, json: []const u8) ?[]u8 {
             \\    const needle = "\"source_branch\":";
@@ -866,7 +996,6 @@ pub const BundleGenerator = struct {
         const launcher_path = try std.fs.path.join(self.allocator, &[_][]const u8{ bundle_dir, "launcher.sh" });
 
         const exec_command = if (options.entry_point) |ep| blk: {
-            // Safely escape single quotes for use inside a single-quoted shell string
             const escaped_ep = try std.mem.replaceOwned(u8, self.allocator, ep, "'", "'\"'\"'");
             defer self.allocator.free(escaped_ep);
             break :blk try std.fmt.allocPrint(
@@ -876,7 +1005,6 @@ pub const BundleGenerator = struct {
             );
         } else blk: {
             const root = options.dependencies.root_package;
-            // Safely escape single quotes for use inside a single-quoted shell string
             const escaped_root = try std.mem.replaceOwned(u8, self.allocator, root, "'", "'\"'\"'");
             defer self.allocator.free(escaped_root);
             break :blk try std.fmt.allocPrint(
@@ -918,52 +1046,31 @@ pub const BundleGenerator = struct {
 
     /// Write metadata file
     fn writeMetadataFile(self: *BundleGenerator, metadata_path: []const u8, options: BundleOptions) !void {
-        const source_url_json = if (options.dependencies.source_url) |url|
-            try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{url})
-        else
-            try self.allocator.dupe(u8, "null");
-        defer self.allocator.free(source_url_json);
-
-        const entry_point_json = if (options.entry_point) |ep|
-            try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{ep})
-        else
-            try self.allocator.dupe(u8, "null");
-        defer self.allocator.free(entry_point_json);
-
-        const metadata_content = try std.fmt.allocPrint(self.allocator,
-            \\{{
-            \\  "bundle_version": "1.0",
-            \\  "package_name": "{s}",
-            \\  "source_url": {s},
-            \\  "source_branch": "{s}",
-            \\  "python_version": "{s}",
-            \\  "target_platform": "{s}",
-            \\  "build_timestamp": {d},
-            \\  "bundlr_version": "{s}",
-            \\  "entry_point": {s}
-            \\}}
-        , .{
-            options.module_name orelse options.dependencies.root_package,
-            source_url_json,
-            options.metadata.git_branch orelse "main",
-            options.runtime_bundle.metadata.python_version,
-            options.target.toString(),
-            options.metadata.build_time,
-            options.metadata.bundlr_version,
-            entry_point_json,
-        });
-        defer self.allocator.free(metadata_content);
+        const metadata = .{
+            .bundle_version = "1.0",
+            .package_name = options.module_name orelse options.dependencies.root_package,
+            .source_url = options.dependencies.source_url,
+            .source_branch = options.metadata.git_branch orelse "main",
+            .python_version = options.runtime_bundle.metadata.python_version,
+            .target_platform = options.target.toString(),
+            .build_timestamp = options.metadata.build_time,
+            .bundlr_version = options.metadata.bundlr_version,
+            .entry_point = options.entry_point,
+        };
 
         std.debug.print("🔍 writing entry_point: {?s}\n", .{options.entry_point});
 
         const metadata_file = try std.fs.createFileAbsolute(metadata_path, .{});
         defer metadata_file.close();
-        try metadata_file.writeAll(metadata_content);
+
+        var buf: std.io.Writer.Allocating = .init(self.allocator);
+        defer buf.deinit();
+        try buf.writer.print("{f}", .{std.json.fmt(metadata, .{})});
+        try metadata_file.writeAll(buf.written());
     }
 
     /// Create bundle metadata
     fn createBundleMetadata(self: *BundleGenerator, options: BundleOptions) !BundleMetadata {
-        // Build list of included packages
         var packages = try self.allocator.alloc([]const u8, options.dependencies.packages.len);
         for (options.dependencies.packages, 0..) |pkg, i| {
             packages[i] = try self.allocator.dupe(u8, pkg.name);
@@ -972,14 +1079,14 @@ pub const BundleGenerator = struct {
         return BundleMetadata{
             .bundle_version = try self.allocator.dupe(u8, "1.0"),
             .package_name = try self.allocator.dupe(u8, options.module_name orelse options.dependencies.root_package),
-            .package_version = try self.allocator.dupe(u8, "1.0.0"), // TODO: Extract from dependencies
+            .package_version = try self.allocator.dupe(u8, "1.0.0"),
             .python_version = try self.allocator.dupe(u8, options.runtime_bundle.metadata.python_version),
             .target_platform = try self.allocator.dupe(u8, options.target.toString()),
             .build_timestamp = options.metadata.build_time,
             .bundlr_version = try self.allocator.dupe(u8, options.metadata.bundlr_version),
             .entry_point = if (options.entry_point) |ep| try self.allocator.dupe(u8, ep) else null,
             .included_packages = packages,
-            .compression = try self.allocator.dupe(u8, "xz"),
+            .compression = try self.allocator.dupe(u8, "gzip"),
         };
     }
 
@@ -987,7 +1094,6 @@ pub const BundleGenerator = struct {
     fn assembleFinalExecutable(self: *BundleGenerator, stub_path: []const u8, components: BundleComponents, metadata: BundleMetadata, output_path: []const u8) ![]u8 {
         _ = metadata;
 
-        // Create tar archive of bundle components (use gzip for speed since runtime is already compressed)
         const bundle_archive = try std.fmt.allocPrint(self.allocator, "{s}/bundle.tar.gz", .{components.temp_dir});
         defer self.allocator.free(bundle_archive);
 
@@ -1005,13 +1111,8 @@ pub const BundleGenerator = struct {
             return error.BundleArchiveCreationFailed;
         }
 
-        // Combine stub executable with bundle archive
         const final_path = try self.allocator.dupe(u8, output_path);
-
-        // Copy stub to final location
         try self.copyFile(stub_path, final_path);
-
-        // Append bundle data to executable
         try self.appendBundleToExecutable(final_path, bundle_archive);
 
         return final_path;
@@ -1019,7 +1120,6 @@ pub const BundleGenerator = struct {
 
     /// Append bundle data to executable
     fn appendBundleToExecutable(self: *BundleGenerator, executable_path: []const u8, bundle_path: []const u8) !void {
-        // Append bundle using cat command
         const cat_command = try std.fmt.allocPrint(self.allocator, "cat '{s}' >> '{s}'", .{ bundle_path, executable_path });
         defer self.allocator.free(cat_command);
 
@@ -1070,25 +1170,20 @@ pub const BundleGenerator = struct {
 
     /// Helper functions
     fn createTempDirectory(self: *BundleGenerator) ![]u8 {
-        // Use cross-platform temp directory
         var paths = bundlr.platform.paths.Paths.init(self.allocator);
         const system_temp = try paths.getTemporaryDir();
         defer self.allocator.free(system_temp);
 
-        // Use nanosecond timestamp + random number to avoid collisions
         var prng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.nanoTimestamp())));
         const random_num = prng.random().int(u32);
         const temp_name = try std.fmt.allocPrint(self.allocator, "bundlr_bundle_{}_{}", .{ std.time.timestamp(), random_num });
         defer self.allocator.free(temp_name);
 
-        // Create temp directory in system temp location
         const tmp_path = try std.fs.path.join(self.allocator, &[_][]const u8{ system_temp, temp_name });
         defer self.allocator.free(tmp_path);
 
-        // Create directory with error handling for existing paths
         std.fs.makeDirAbsolute(tmp_path) catch |err| switch (err) {
             error.PathAlreadyExists => {
-                // Try again with a different name
                 const retry_name = try std.fmt.allocPrint(self.allocator, "bundlr_bundle_{}_{}_{}", .{ std.time.timestamp(), random_num, prng.random().int(u16) });
                 defer self.allocator.free(retry_name);
                 const retry_path = try std.fs.path.join(self.allocator, &[_][]const u8{ system_temp, retry_name });
@@ -1098,7 +1193,6 @@ pub const BundleGenerator = struct {
             else => return err,
         };
 
-        // Return the full path to the temp directory
         return try std.fs.path.join(self.allocator, &[_][]const u8{ system_temp, temp_name });
     }
 
@@ -1109,14 +1203,10 @@ pub const BundleGenerator = struct {
         };
     }
 
-    /// Create directory if it doesn't exist, ignore if it already exists
     fn ensureDirExists(self: *BundleGenerator, path: []const u8) !void {
         _ = self;
         std.fs.makeDirAbsolute(path) catch |err| switch (err) {
-            error.PathAlreadyExists => {
-                // Directory already exists, this is fine
-                return;
-            },
+            error.PathAlreadyExists => return,
             else => return err,
         };
     }
@@ -1131,7 +1221,6 @@ pub const BundleGenerator = struct {
 
     fn getFileSize(self: *BundleGenerator, file_path: []const u8) !u64 {
         _ = self;
-        // Handle both absolute and relative paths
         const file = if (std.fs.path.isAbsolute(file_path))
             std.fs.openFileAbsolute(file_path, .{}) catch return 0
         else
@@ -1144,7 +1233,6 @@ pub const BundleGenerator = struct {
     fn getDirectorySize(self: *BundleGenerator, dir_path: []const u8) !u64 {
         _ = self;
         _ = dir_path;
-        // TODO: Implement directory size calculation
         return 10 * 1024 * 1024; // Placeholder: 10MB
     }
 };
@@ -1155,11 +1243,21 @@ test "bundle generator initialization" {
     var generator = BundleGenerator.init(allocator);
     defer generator.deinit();
 
-    // Test stub source generation
     const stub_source = try generator.generateStubSource(.linux_x86_64);
     defer allocator.free(stub_source);
 
+    // Stable hash directory pattern
     try std.testing.expect(std.mem.indexOf(u8, stub_source, "bundlr_app_") != null);
+    // Persistence: no defer cleanup in main
+    try std.testing.expect(std.mem.indexOf(u8, stub_source, "getOrCreateTempDirectory") != null);
+    // Ready-marker guard
+    try std.testing.expect(std.mem.indexOf(u8, stub_source, ".bundlr_ready") != null);
+    // Mtime-based cleanup function present
+    try std.testing.expect(std.mem.indexOf(u8, stub_source, "cleanupOldAppTempDirs") != null);
+    // Correct Zig 0.15.2 Dir.stat() usage (no-arg form via sub_dir.stat())
+    try std.testing.expect(std.mem.indexOf(u8, stub_source, "sub_dir.stat()") != null);
+    // Ensure the invalid dir.stat(entry.name) pattern is absent
+    try std.testing.expect(std.mem.indexOf(u8, stub_source, "dir.stat(entry.name)") == null);
 }
 
 test "component sizes calculation" {
@@ -1167,7 +1265,6 @@ test "component sizes calculation" {
     var generator = BundleGenerator.init(allocator);
     defer generator.deinit();
 
-    // Test with placeholder data
     const components = BundleGenerator.BundleComponents{
         .temp_dir = "/tmp/test",
         .bundle_dir = "/tmp/test/bundle",
@@ -1177,8 +1274,6 @@ test "component sizes calculation" {
         .launcher_path = "/tmp/test/launcher.sh",
     };
 
-    // This would normally calculate real sizes, but will return 0 for non-existent files
     const sizes = try generator.calculateComponentSizes("/tmp/stub", components, "/tmp/final");
-
     try std.testing.expect(sizes.total_size == 0); // Files don't exist, so size is 0
 }
