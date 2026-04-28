@@ -179,7 +179,7 @@ fn runBuildMode(allocator: std.mem.Allocator, args: []const []const u8) !void {
 fn createRuntimeConfig(allocator: std.mem.Allocator, package_arg: []const u8) !bundlr.config.RuntimeConfig {
     const build_config = bundlr.config.BuildConfig{};
     if (isGitRepository(package_arg)) {
-        const parsed = try parseGitHubTreeUrl(allocator, package_arg);
+        const parsed = try parseGitTreeUrl(allocator, package_arg);
         defer allocator.free(parsed.base_url);
         defer if (parsed.branch) |b| allocator.free(b);
         return try bundlr.config.createGit(allocator, parsed.base_url, build_config.default_python_version, parsed.branch);
@@ -274,19 +274,16 @@ pub fn main() !void {
 fn isGitRepository(package_arg: []const u8) bool {
     return std.mem.startsWith(u8, package_arg, "http://") or
         std.mem.startsWith(u8, package_arg, "https://") or
-        std.mem.startsWith(u8, package_arg, "git@") or
-        std.mem.indexOf(u8, package_arg, "github.com") != null or
-        std.mem.indexOf(u8, package_arg, "gitlab.com") != null;
+        std.mem.startsWith(u8, package_arg, "git@");
 }
 
 /// Extract branch from a GitHub /tree/ URL, returning base repo URL and optional branch
-fn parseGitHubTreeUrl(allocator: std.mem.Allocator, url: []const u8) !struct { base_url: []u8, branch: ?[]u8 } {
-    const prefix = "https://github.com/";
-    if (std.mem.startsWith(u8, url, prefix)) {
-        const path = url[prefix.len..];
-        if (std.mem.indexOf(u8, path, "/tree/")) |idx| {
-            const base = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, path[0..idx] });
-            const branch = try allocator.dupe(u8, path[idx + "/tree/".len ..]);
+fn parseGitTreeUrl(allocator: std.mem.Allocator, url: []const u8) !struct { base_url: []u8, branch: ?[]u8 } {
+    // Handle /tree/<branch> URLs for GitHub, Codeberg, or any forge
+    if (std.mem.startsWith(u8, url, "https://") or std.mem.startsWith(u8, url, "http://")) {
+        if (std.mem.indexOf(u8, url, "/tree/")) |idx| {
+            const base = try allocator.dupe(u8, url[0..idx]);
+            const branch = try allocator.dupe(u8, url[idx + "/tree/".len ..]);
             return .{ .base_url = base, .branch = branch };
         }
     }
