@@ -362,29 +362,35 @@ pub const BuildPipeline = struct {
 
         std.debug.print("🔍 Discovering Python module name...\n", .{});
 
-        // Download and extract the repository
         var git_manager = bundlr.git.archive.GitArchiveManager.init(self.allocator);
-        const extract_dir = try git_manager.downloadRepository(
+
+        // Step 1: download → returns path to the .tar.gz archive file
+        const archive_path = try git_manager.downloadRepository(
             self.options.package,
             null,
             null,
             null,
             null,
         );
-        defer self.allocator.free(extract_dir);
+        defer self.allocator.free(archive_path);
 
-        // GitHub archives extract to a subdirectory like "repo-branch/"
-        const repo_dir = try self.findRepoRoot(extract_dir);
-        defer if (repo_dir) |d| self.allocator.free(d);
+        // Step 2: extract → returns the project directory inside the archive.
+        // extractRepository already calls findProjectDirectory internally, so
+        // `repo_root` is already the inner "repo-branch/" directory; no need
+        // for the separate findRepoRoot pass.
+        const project_name = self.getPackageName(); // e.g. "distil"
+        const repo_root = try git_manager.extractRepository(archive_path, project_name);
+        defer {
+            git_manager.cleanupExtraction(repo_root);
+            self.allocator.free(repo_root);
+        }
 
-        const search_base = repo_dir orelse extract_dir;
-
-        // Try src layout first (PEP 621), then flat layout
-        if (try self.scanForMainModule(search_base, "src")) |name| {
+        // Try src layout (PEP 621) then flat layout
+        if (try self.scanForMainModule(repo_root, "src")) |name| {
             std.debug.print("✅ Discovered module: {s} (src layout)\n", .{name});
             return name;
         }
-        if (try self.scanForMainModule(search_base, null)) |name| {
+        if (try self.scanForMainModule(repo_root, null)) |name| {
             std.debug.print("✅ Discovered module: {s} (flat layout)\n", .{name});
             return name;
         }
