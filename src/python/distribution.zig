@@ -219,14 +219,6 @@ pub const DistributionManager = struct {
         arch: Architecture,
         progress_fn: ?http.ProgressFn,
     ) !void {
-        // Check if already cached (use target-specific cache path)
-        const cache_key = try std.fmt.allocPrint(self.allocator, "{s}-{s}-{s}", .{
-            python_version,
-            platform.toString(),
-            arch.toString(),
-        });
-        defer self.allocator.free(cache_key);
-
         const install_dir = try self.getTargetInstallDir(python_version, platform, arch);
         defer self.allocator.free(install_dir);
 

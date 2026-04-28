@@ -197,7 +197,7 @@ pub const BuildPipeline = struct {
                 };
                 continue;
             };
-            defer _ = dependencies.deinit(self.allocator);
+            defer dependencies.deinit(self.allocator);
 
             std.debug.print("✅ Resolved {} dependencies\n", .{dependencies.packages.len});
 

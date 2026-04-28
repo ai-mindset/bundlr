@@ -635,8 +635,8 @@ fn printUsage(program_name: []const u8) void {
     print("  --output <file>         Output file path\n", .{});
     print("  --output-dir <dir>      Output directory for multiple targets\n", .{});
     print("  --python-version <ver>  Python version to embed (default: 3.14)\n", .{});
-    print("  --optimize-size         Optimise for smaller executable size\n", .{});
-    print("  --optimize-speed        Optimise for faster runtime performance\n", .{});
+    print("  --optimise-size         Optimise for smaller executable size\n", .{});
+    print("  --optimise-speed        Optimise for faster runtime performance\n", .{});
     print("  --exclude-dev-deps      Exclude development dependencies\n", .{});
     print("  --entry-point <script>  Custom entry point script\n", .{});
 
