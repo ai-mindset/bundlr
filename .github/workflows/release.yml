@@ -5,135 +5,63 @@ on:
     tags:
       - 'v*.*.*'
 
+# Cancel any in-progress run for the same tag (e.g. on a re-push)
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
+  attestations: write
+  id-token: write
 
 jobs:
-  build:
-    name: Build for ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-linux
-            artifact_name: bundlr-linux-x86_64
-          - os: macos-latest
-            target: x86_64-macos
-            artifact_name: bundlr-macos-x86_64
-          - os: macos-latest
-            target: aarch64-macos
-            artifact_name: bundlr-macos-aarch64
-          - os: windows-latest
-            target: x86_64-windows
-            artifact_name: bundlr-windows-x86_64.exe
+  build-and-release:
+    name: Build and Release
+    # Cross-compile all targets from a single Linux runner using Zig's
+    # built-in cross-compilation. This avoids expensive macOS/Windows runners
+    # and eliminates the multi-runner artifact upload/download round-trip.
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Zig
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.15.2
 
-      - name: Build bundlr
-        run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
-
-      - name: Rename artifact (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          cp zig-out/bin/bundlr ${{ matrix.artifact_name }}
-
-      - name: Rename artifact (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: copy zig-out\bin\bundlr.exe ${{ matrix.artifact_name }}
-
-      - name: Generate checksum
-        shell: bash
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            # Use PowerShell for reliable checksum on Windows
-            powershell -Command "(Get-FileHash -Algorithm SHA256 \"${{ matrix.artifact_name }}\").Hash.ToLower()" > "${{ matrix.artifact_name }}.sha256"
-          else
-            shasum -a 256 "${{ matrix.artifact_name }}" | awk '{print $1}' > "${{ matrix.artifact_name }}.sha256"
-          fi
-          echo "Checksum for ${{ matrix.artifact_name }}:"
-          cat "${{ matrix.artifact_name }}.sha256"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: |
-            ${{ matrix.artifact_name }}
-            ${{ matrix.artifact_name }}.sha256
-
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      attestations: write
-      id-token: write
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Display structure of downloaded files
-        run: ls -R artifacts
-
-      - name: Flatten artifacts directory
+      - name: Build all targets
         run: |
           mkdir -p release-files
-          # Copy each artifact to release-files, preserving unique names
-          # The artifact structure is: artifacts/<artifact-name>/<artifact-name>
-          for artifact_dir in artifacts/*/; do
-            if ! cp -v "${artifact_dir}"* release-files/ 2>/dev/null; then
-              echo "Warning: Failed to copy from ${artifact_dir}"
-            fi
-          done
-          ls -lh release-files/
-          # Verify we have files
-          if [ -z "$(ls -A release-files/)" ]; then
-            echo "Error: No files copied to release-files/"
-            exit 1
-          fi
+
+          zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux
+          cp zig-out/bin/bundlr release-files/bundlr-linux-x86_64
+
+          zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
+          cp zig-out/bin/bundlr release-files/bundlr-macos-x86_64
+
+          zig build -Doptimize=ReleaseFast -Dtarget=aarch64-macos
+          cp zig-out/bin/bundlr release-files/bundlr-macos-aarch64
+
+          zig build -Doptimize=ReleaseFast -Dtarget=x86_64-windows
+          cp zig-out/bin/bundlr.exe release-files/bundlr-windows-x86_64.exe
 
       - name: Set executable permissions
-        run: |
-          # Ensure Unix binaries have execute permissions
-          # This is critical - without this, downloaded binaries won't run
-          chmod +x release-files/bundlr-linux-* release-files/bundlr-macos-* 2>/dev/null || true
-          echo "Permissions after chmod:"
-          ls -lh release-files/
+        run: chmod +x release-files/bundlr-linux-* release-files/bundlr-macos-*
 
-      - name: Generate combined SHA256SUMS file
+      - name: Generate checksums
         run: |
           cd release-files
-          # Generate checksums for binary files only (exclude .sha256 files)
-          # Enable nullglob to handle case where no files match patterns
-          shopt -s nullglob
-          checksums_generated=0
-          for file in bundlr-linux-* bundlr-macos-* bundlr-windows-*.exe; do
-            if [[ -f "$file" && ! "$file" == *.sha256 ]]; then
-              shasum -a 256 "$file" >> SHA256SUMS
-              checksums_generated=1
-            fi
+          for binary in bundlr-linux-x86_64 bundlr-macos-x86_64 bundlr-macos-aarch64 bundlr-windows-x86_64.exe; do
+            shasum -a 256 "$binary" | tee -a SHA256SUMS | awk '{print $1}' > "${binary}.sha256"
           done
-          if [ "$checksums_generated" -eq 0 ]; then
-            echo "Error: No binaries found to checksum"
-            exit 1
-          fi
           echo "Generated SHA256SUMS:"
           cat SHA256SUMS
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: |
             release-files/bundlr-linux-x86_64
@@ -142,7 +70,7 @@ jobs:
             release-files/bundlr-windows-x86_64.exe
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             release-files/bundlr-linux-x86_64
@@ -157,7 +85,8 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-          body: |
+          body_suffix: |
+
             ## 🔒 Verifying Downloads
 
             All binaries include SHA256 checksums for verification. Download both the binary and its `.sha256` file to verify:
