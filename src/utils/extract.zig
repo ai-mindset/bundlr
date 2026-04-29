@@ -120,7 +120,7 @@ fn extractTarGzWithSystemTar(allocator: std.mem.Allocator, target_dir: []const u
                 return err;
             };
 
-            _ = tar_result; // Suppress unused variable warning if tar succeeds
+            try tar_result; // Suppress unused variable warning if tar succeeds
         },
         else => {
             // Unix-like systems: use tar directly
@@ -180,7 +180,8 @@ fn extractWithWindowsPowerShell(allocator: std.mem.Allocator, target_dir: []cons
     const args = [_][]const u8{
         "powershell",
         "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
+        "-ExecutionPolicy",
+        "Bypass",
         "-Command",
         command,
     };
@@ -218,7 +219,8 @@ fn extractZipWithSystemUnzip(allocator: std.mem.Allocator, target_dir: []const u
             const args = [_][]const u8{
                 "powershell",
                 "-NoProfile",
-                "-ExecutionPolicy", "Bypass",
+                "-ExecutionPolicy",
+                "Bypass",
                 "-Command",
                 command,
             };
@@ -317,3 +319,4 @@ test "single file extraction via extractArchive" {
     const bytes_read = try file.readAll(&buf);
     try std.testing.expectEqualStrings(test_data, buf[0..bytes_read]);
 }
+
