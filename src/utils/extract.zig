@@ -112,15 +112,14 @@ fn extractTarGzWithSystemTar(allocator: std.mem.Allocator, target_dir: []const u
     switch (builtin.os.tag) {
         .windows => {
             // On Windows, try tar first (available on Windows 10+), then fall back to PowerShell
-            const tar_result = extractWithWindowsTar(allocator, target_dir, archive_path) catch |err| blk: {
+            extractWithWindowsTar(allocator, target_dir, archive_path) catch |err| {
                 if (err == error.FileNotFound) {
                     // tar not available, try PowerShell (treat tar.gz as zip for compatibility)
-                    break :blk extractWithWindowsPowerShell(allocator, target_dir, archive_path);
+                    try extractWithWindowsPowerShell(allocator, target_dir, archive_path);
+                } else {
+                    return err;
                 }
-                return err;
             };
-
-            try tar_result; // Suppress unused variable warning if tar succeeds
         },
         else => {
             // Unix-like systems: use tar directly
@@ -319,4 +318,3 @@ test "single file extraction via extractArchive" {
     const bytes_read = try file.readAll(&buf);
     try std.testing.expectEqualStrings(test_data, buf[0..bytes_read]);
 }
-
