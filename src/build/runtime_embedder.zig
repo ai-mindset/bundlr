@@ -621,7 +621,7 @@ pub const RuntimeEmbedder = struct {
                     try self.copyDirectoryRecursive(src_path, dest_path);
                 },
                 .sym_link => {
-                    var link_target_buffer: [4096]u8 = undefined;
+                    var link_target_buffer: [std.fs.max_path_bytes]u8 = undefined;
                     const link_target = try std.fs.readLinkAbsolute(src_path, &link_target_buffer);
                     std.fs.symLinkAbsolute(link_target, dest_path, .{}) catch |err| {
                         std.log.warn("Failed to create symlink {s} -> {s}: {}", .{ dest_path, link_target, err });
