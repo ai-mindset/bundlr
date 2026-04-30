@@ -88,7 +88,6 @@ jobs:
           prerelease: false
           generate_release_notes: true
           body_suffix: |
-
             ## 🔒 Verifying Downloads
 
             All binaries include SHA256 checksums for verification. Download both the binary and its `.sha256` file to verify:
