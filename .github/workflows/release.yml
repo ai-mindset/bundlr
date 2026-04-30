@@ -49,7 +49,9 @@ jobs:
           cp zig-out/bin/bundlr.exe release-files/bundlr-windows-x86_64.exe
 
       - name: Set executable permissions
-        run: chmod +x release-files/bundlr-linux-* release-files/bundlr-macos-*
+        run: |
+          shopt -s nullglob
+          chmod +x release-files/bundlr-linux-* release-files/bundlr-macos-*
 
       - name: Generate checksums
         run: |
