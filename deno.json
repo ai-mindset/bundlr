@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "lib": ["deno.desktop"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true
+  },
+  "fmt": {
+    "include": ["deno.json", "scripts/**/*.ts", "src/**/*.ts"],
+    "lineWidth": 100,
+    "semiColons": true,
+    "singleQuote": false
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "tasks": {
+    "build": "deno task desktop:build",
+    "build:cli": "deno task prepare:uv && deno compile --allow-read --allow-write --allow-run --allow-env --allow-net --include vendor/uv --output dist/bundlr src/main.ts",
+    "check": "deno fmt --check && deno lint && deno check src/main.ts src/desktop.ts scripts/prepare_uv.ts scripts/check_artifact_size.ts",
+    "desktop:build": "deno task prepare:uv && deno desktop --allow-read --allow-write --allow-run --allow-env --allow-net --include vendor/uv --output dist/bundlr-desktop.AppImage src/desktop.ts",
+    "desktop:dev": "deno desktop --hmr --allow-read --allow-write --allow-run --allow-env --allow-net src/desktop.ts",
+    "prepare:uv": "deno run --allow-net=github.com,release-assets.githubusercontent.com --allow-read --allow-write --allow-run=tar --allow-env scripts/prepare_uv.ts",
+    "test": "deno test --allow-read --allow-write --allow-run --allow-env",
+    "start": "deno run --allow-read --allow-write --allow-run --allow-env --allow-net src/main.ts"
+  }
+}
