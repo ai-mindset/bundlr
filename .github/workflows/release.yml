@@ -1,208 +1,207 @@
-name: Build and Release
+name: Cross-platform packaging
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    branches:
+      - main
+      - rewrite/deno-typescript
+  pull_request:
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  DENO_VERSION: v2.9.4
+  MAX_CLIENT_BYTES: "60000000"
+  SAMPLE_REQUIREMENT: pycowsay==0.0.0.2
 
 jobs:
-  build:
-    name: Build for ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+      - run: deno task check
+      - run: deno task test
+
+  native:
+    needs: verify
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-linux
-            artifact_name: bundlr-linux-x86_64
-          - os: macos-latest
-            target: x86_64-macos
-            artifact_name: bundlr-macos-x86_64
-          - os: macos-latest
-            target: aarch64-macos
-            artifact_name: bundlr-macos-aarch64
-          - os: windows-latest
-            target: x86_64-windows
-            artifact_name: bundlr-windows-x86_64.exe
+          - runner: ubuntu-22.04
+            deno_target: x86_64-unknown-linux-gnu
+            bundlr_target: linux-x86_64
+            name: linux-x86_64
+            cli: bundlr-cli-linux-x86_64
+            desktop: bundlr-linux-x86_64.AppImage
+            distributable: bundlr-linux-x86_64.AppImage
+            client_archive: PyCowsay-linux-x86_64.tar.gz
+          - runner: windows-2022
+            deno_target: x86_64-pc-windows-msvc
+            bundlr_target: windows-x86_64
+            name: windows-x86_64
+            cli: bundlr-cli-windows-x86_64.exe
+            desktop: Bundlr-windows-x86_64.exe
+            distributable: Bundlr-windows-x86_64.exe
+            client_archive: PyCowsay-windows-x86_64.zip
+          - runner: macos-15
+            deno_target: aarch64-apple-darwin
+            bundlr_target: macos-arm64
+            name: macos-arm64
+            cli: bundlr-cli-macos-arm64
+            desktop: Bundlr.app
+            distributable: Bundlr-macos-arm64.dmg
+            client_archive: PyCowsay-macos-arm64.tar.gz
+          - runner: macos-15-intel
+            deno_target: x86_64-apple-darwin
+            bundlr_target: macos-x86_64
+            name: macos-x86_64
+            cli: bundlr-cli-macos-x86_64
+            desktop: Bundlr.app
+            distributable: Bundlr-macos-x86_64.dmg
+            client_archive: PyCowsay-macos-x86_64.tar.gz
 
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v2
+      - uses: actions/checkout@v6
+      - uses: denoland/setup-deno@v2
         with:
-          version: 0.15.2
+          deno-version: ${{ env.DENO_VERSION }}
 
-      - name: Build bundlr
-        run: zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+      - name: Prepare checksum-verified uv
+        run: deno task prepare:uv ${{ matrix.deno_target }}
 
-      - name: Rename artifact (Unix)
+      - name: Compile Bundlr CLI
+        run: >-
+          deno compile
+          --target ${{ matrix.deno_target }}
+          --allow-read
+          --allow-write
+          --allow-run
+          --allow-env
+          --allow-net
+          --include vendor/uv
+          --output dist/${{ matrix.cli }}
+          src/main.ts
+
+      - name: Diagnose Bundlr CLI on Unix
         if: runner.os != 'Windows'
-        run: |
-          cp zig-out/bin/bundlr ${{ matrix.artifact_name }}
+        run: ./dist/${{ matrix.cli }} --diagnose
 
-      - name: Rename artifact (Windows)
+      - name: Diagnose Bundlr CLI on Windows
         if: runner.os == 'Windows'
-        shell: cmd
-        run: copy zig-out\bin\bundlr.exe ${{ matrix.artifact_name }}
+        shell: pwsh
+        run: |
+          & ".\dist\${{ matrix.cli }}" --diagnose
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Generate checksum
+      - name: Build Bundlr desktop application
+        run: >-
+          deno desktop
+          --target ${{ matrix.deno_target }}
+          --allow-read
+          --allow-write
+          --allow-run
+          --allow-env
+          --allow-net
+          --include vendor/uv
+          --output dist/${{ matrix.desktop }}
+          src/desktop.ts
+
+      - name: Diagnose Linux desktop application
+        if: runner.os == 'Linux'
+        run: xvfb-run -a env APPIMAGE_EXTRACT_AND_RUN=1 ./dist/${{ matrix.desktop }} --diagnose
+
+      - name: Diagnose macOS desktop application
+        if: runner.os == 'macOS'
+        run: ./dist/${{ matrix.desktop }}/Contents/MacOS/Bundlr --diagnose
+
+      - name: Diagnose Windows desktop application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & ".\dist\${{ matrix.desktop }}" --diagnose
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package macOS DMG
+        if: runner.os == 'macOS'
+        run: >-
+          deno desktop
+          --target ${{ matrix.deno_target }}
+          --allow-read
+          --allow-write
+          --allow-run
+          --allow-env
+          --allow-net
+          --include vendor/uv
+          --output dist/${{ matrix.distributable }}
+          src/desktop.ts
+
+      - name: Package pinned sample application
+        run: >-
+          deno run
+          --allow-read
+          --allow-write
+          --allow-run
+          --allow-env
+          --allow-net
+          src/main.ts
+          --name PyCowsay
+          --command pycowsay
+          --kind console
+          --target ${{ matrix.bundlr_target }}
+          --output sample-dist
+          ${{ env.SAMPLE_REQUIREMENT }}
+
+      - name: Smoke-test generated application on Unix
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            # Use PowerShell for reliable checksum on Windows
-            powershell -Command "(Get-FileHash -Algorithm SHA256 \"${{ matrix.artifact_name }}\").Hash.ToLower()" > "${{ matrix.artifact_name }}.sha256"
-          else
-            shasum -a 256 "${{ matrix.artifact_name }}" | awk '{print $1}' > "${{ matrix.artifact_name }}.sha256"
-          fi
-          echo "Checksum for ${{ matrix.artifact_name }}:"
-          cat "${{ matrix.artifact_name }}.sha256"
+          output="$(./sample-dist/PyCowsay/PyCowsay "CI smoke test")"
+          echo "$output"
+          [[ "$output" == *"CI smoke test"* ]]
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Smoke-test generated application on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $output = & ".\sample-dist\PyCowsay\PyCowsay.exe" "CI smoke test"
+          $output
+          if (($output -join "`n") -notmatch "CI smoke test") {
+            throw "Generated application produced unexpected output."
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Enforce unpacked client size budget
+        run: >-
+          deno run --allow-read
+          scripts/check_artifact_size.ts
+          sample-dist/PyCowsay
+          ${{ env.MAX_CLIENT_BYTES }}
+
+      - name: Archive generated application on Unix
+        if: runner.os != 'Windows'
+        run: tar -C sample-dist -czf dist/${{ matrix.client_archive }} PyCowsay
+
+      - name: Archive generated application on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          Compress-Archive
+          -Path .\sample-dist\PyCowsay
+          -DestinationPath .\dist\${{ matrix.client_archive }}
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
+          name: bundlr-${{ matrix.name }}
           path: |
-            ${{ matrix.artifact_name }}
-            ${{ matrix.artifact_name }}.sha256
-
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      attestations: write
-      id-token: write
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Display structure of downloaded files
-        run: ls -R artifacts
-
-      - name: Flatten artifacts directory
-        run: |
-          mkdir -p release-files
-          # Copy each artifact to release-files, preserving unique names
-          # The artifact structure is: artifacts/<artifact-name>/<artifact-name>
-          for artifact_dir in artifacts/*/; do
-            if ! cp -v "${artifact_dir}"* release-files/ 2>/dev/null; then
-              echo "Warning: Failed to copy from ${artifact_dir}"
-            fi
-          done
-          ls -lh release-files/
-          # Verify we have files
-          if [ -z "$(ls -A release-files/)" ]; then
-            echo "Error: No files copied to release-files/"
-            exit 1
-          fi
-
-      - name: Set executable permissions
-        run: |
-          # Ensure Unix binaries have execute permissions
-          # This is critical - without this, downloaded binaries won't run
-          chmod +x release-files/bundlr-linux-* release-files/bundlr-macos-* 2>/dev/null || true
-          echo "Permissions after chmod:"
-          ls -lh release-files/
-
-      - name: Generate combined SHA256SUMS file
-        run: |
-          cd release-files
-          # Generate checksums for binary files only (exclude .sha256 files)
-          # Enable nullglob to handle case where no files match patterns
-          shopt -s nullglob
-          checksums_generated=0
-          for file in bundlr-linux-* bundlr-macos-* bundlr-windows-*.exe; do
-            if [[ -f "$file" && ! "$file" == *.sha256 ]]; then
-              shasum -a 256 "$file" >> SHA256SUMS
-              checksums_generated=1
-            fi
-          done
-          if [ "$checksums_generated" -eq 0 ]; then
-            echo "Error: No binaries found to checksum"
-            exit 1
-          fi
-          echo "Generated SHA256SUMS:"
-          cat SHA256SUMS
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: |
-            release-files/bundlr-linux-x86_64
-            release-files/bundlr-macos-x86_64
-            release-files/bundlr-macos-aarch64
-            release-files/bundlr-windows-x86_64.exe
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release-files/bundlr-linux-x86_64
-            release-files/bundlr-linux-x86_64.sha256
-            release-files/bundlr-macos-x86_64
-            release-files/bundlr-macos-x86_64.sha256
-            release-files/bundlr-macos-aarch64
-            release-files/bundlr-macos-aarch64.sha256
-            release-files/bundlr-windows-x86_64.exe
-            release-files/bundlr-windows-x86_64.exe.sha256
-            release-files/SHA256SUMS
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          body: |
-            ## 🔒 Verifying Downloads
-
-            All binaries include SHA256 checksums for verification. Download both the binary and its `.sha256` file to verify:
-
-            **Linux/macOS:**
-            ```bash
-            # Download binary and checksum
-            curl -LO https://github.com/ai-mindset/bundlr/releases/download/${{ github.ref_name }}/bundlr-linux-x86_64
-            curl -LO https://github.com/ai-mindset/bundlr/releases/download/${{ github.ref_name }}/bundlr-linux-x86_64.sha256
-
-            # Verify checksum
-            echo "$(cat bundlr-linux-x86_64.sha256)  bundlr-linux-x86_64" | shasum -a 256 -c -
-
-            # Make executable (required on Unix systems)
-            chmod +x bundlr-linux-x86_64
-
-            # Run it
-            ./bundlr-linux-x86_64 --help
-            ```
-
-            **Windows (PowerShell):**
-            ```powershell
-            # Download binary and checksum
-            Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/${{ github.ref_name }}/bundlr-windows-x86_64.exe" -OutFile "bundlr-windows-x86_64.exe"
-            Invoke-WebRequest -Uri "https://github.com/ai-mindset/bundlr/releases/download/${{ github.ref_name }}/bundlr-windows-x86_64.exe.sha256" -OutFile "bundlr-windows-x86_64.exe.sha256"
-
-            # Verify checksum
-            $expected = (Get-Content bundlr-windows-x86_64.exe.sha256).Trim()
-            $actual = (Get-FileHash bundlr-windows-x86_64.exe -Algorithm SHA256).Hash.ToLower()
-            if ($expected -eq $actual) {
-                Write-Host "✓ Checksum verified!" -ForegroundColor Green
-            } else {
-                Write-Host "✗ Checksum mismatch!" -ForegroundColor Red
-            }
-            ```
-
-            You can also verify the complete `SHA256SUMS` file for all binaries.
-
-            ### 🛡️ Build Provenance
-
-            This release includes [SLSA build provenance attestations](https://slsa.dev/) generated by GitHub Actions. You can verify the authenticity and build process using the GitHub CLI:
-
-            ```bash
-            # Install GitHub CLI if needed: https://cli.github.com/
-            gh attestation verify bundlr-linux-x86_64 --repo ai-mindset/bundlr
-            ```
-
-            This ensures the binaries were built by our official CI pipeline and haven't been tampered with.
+            dist/${{ matrix.distributable }}
+            dist/${{ matrix.client_archive }}
+          if-no-files-found: error
+          compression-level: 0
