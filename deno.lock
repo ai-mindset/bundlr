@@ -3,11 +3,13 @@
   "specifiers": {
     "jsr:@std/assert@*": "1.0.19",
     "jsr:@std/assert@1.0.14": "1.0.14",
+    "jsr:@std/assert@1.0.19": "1.0.19",
     "jsr:@std/internal@^1.0.10": "1.0.14",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
     "jsr:@std/path@*": "1.1.6",
-    "jsr:@std/path@1.1.2": "1.1.2"
+    "jsr:@std/path@1.1.2": "1.1.2",
+    "jsr:@zip-js/zip-js@2.8.34": "2.8.34"
   },
   "jsr": {
     "@std/assert@1.0.14": {
@@ -36,6 +38,9 @@
       "dependencies": [
         "jsr:@std/internal@^1.0.14"
       ]
+    },
+    "@zip-js/zip-js@2.8.34": {
+      "integrity": "65f9aff4ace08c738c3e3887975a206e4976ecfc7e1b62a876bc7c848ae5cb0b"
     }
   }
 }
