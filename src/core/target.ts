@@ -17,15 +17,3 @@ export function currentTarget(
     `Bundlr does not support packaging on ${os}-${arch}.`,
   );
 }
-
-export function requireNativeTarget(
-  targets: readonly TargetPlatform[],
-  nativeTarget: TargetPlatform = currentTarget(),
-): TargetPlatform {
-  if (targets.length !== 1 || targets[0] !== nativeTarget) {
-    throw new UnsupportedTargetError(
-      `This worker can build only ${nativeTarget}; requested: ${targets.join(", ")}.`,
-    );
-  }
-  return nativeTarget;
-}

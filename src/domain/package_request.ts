@@ -6,7 +6,7 @@ export type TargetPlatform =
   | "macos-x86_64"
   | "windows-x86_64";
 
-export type ApplicationKind = "console" | "windowed";
+export type ApplicationKind = "auto" | "console" | "windowed";
 
 export interface PackageRequest {
   readonly source: PackageSource;
@@ -16,7 +16,6 @@ export interface PackageRequest {
   readonly python: string;
   readonly targets: readonly TargetPlatform[];
   readonly outputDirectory: string;
-  readonly collectPackages?: readonly string[];
 }
 
 export class InvalidPackageRequestError extends Error {
@@ -34,7 +33,7 @@ export function validatePackageRequest(request: PackageRequest): PackageRequest 
       "Application name may contain only letters, numbers, spaces, dots, underscores, and hyphens.",
     );
   }
-  requireValue(request.command, "Application command");
+  if (request.command.length > 0) requireValue(request.command, "Application command");
   requireValue(request.python, "Python version");
   requireValue(request.outputDirectory, "Output directory");
 
@@ -44,20 +43,6 @@ export function validatePackageRequest(request: PackageRequest): PackageRequest 
   if (new Set(request.targets).size !== request.targets.length) {
     throw new InvalidPackageRequestError("Target platforms must be unique.");
   }
-  for (const packageName of request.collectPackages ?? []) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(packageName)) {
-      throw new InvalidPackageRequestError(
-        `Invalid package collection name: ${packageName}`,
-      );
-    }
-  }
-  if (
-    new Set(request.collectPackages ?? []).size !==
-      (request.collectPackages ?? []).length
-  ) {
-    throw new InvalidPackageRequestError("Package collection names must be unique.");
-  }
-
   return request;
 }
 

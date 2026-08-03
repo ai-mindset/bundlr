@@ -54,25 +54,3 @@ Deno.test("rejects application names that are unsafe as directory names", () => 
     "Application name may contain only",
   );
 });
-
-Deno.test("accepts package collection hints", () => {
-  const request = { ...validRequest, collectPackages: ["textual", "posting.data"] };
-  assertEquals(validatePackageRequest(request), request);
-});
-
-Deno.test("rejects duplicate or unsafe package collection hints", () => {
-  assertThrows(
-    () =>
-      validatePackageRequest({
-        ...validRequest,
-        collectPackages: ["textual", "textual"],
-      }),
-    InvalidPackageRequestError,
-    "must be unique",
-  );
-  assertThrows(
-    () => validatePackageRequest({ ...validRequest, collectPackages: ["../textual"] }),
-    InvalidPackageRequestError,
-    "Invalid package collection name",
-  );
-});
