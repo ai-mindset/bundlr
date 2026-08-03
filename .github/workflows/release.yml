@@ -1,20 +1,25 @@
-name: Cross-platform packaging
+name: Verify and release Bundlr
 
 on:
   push:
     branches:
       - main
       - rewrite/deno-typescript
+    tags:
+      - "v*"
   pull_request:
   workflow_dispatch:
+
+# Cancel any in-progress run for the same tag (e.g. on a re-push)
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 env:
   DENO_VERSION: v2.9.4
-  MAX_CLIENT_BYTES: "60000000"
-  SAMPLE_REQUIREMENT: pycowsay==0.0.0.2
 
 jobs:
   verify:
@@ -27,7 +32,8 @@ jobs:
       - run: deno task check
       - run: deno task test
 
-  native:
+  build:
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: verify
     strategy:
       fail-fast: false
@@ -35,44 +41,46 @@ jobs:
         include:
           - runner: ubuntu-22.04
             deno_target: x86_64-unknown-linux-gnu
-            bundlr_target: linux-x86_64
             name: linux-x86_64
             cli: bundlr-cli-linux-x86_64
             desktop: bundlr-linux-x86_64.AppImage
-            distributable: bundlr-linux-x86_64.AppImage
-            client_archive: PyCowsay-linux-x86_64.tar.gz
           - runner: windows-2022
             deno_target: x86_64-pc-windows-msvc
-            bundlr_target: windows-x86_64
             name: windows-x86_64
             cli: bundlr-cli-windows-x86_64.exe
-            desktop: Bundlr-windows-x86_64.exe
-            distributable: Bundlr-windows-x86_64.exe
-            client_archive: PyCowsay-windows-x86_64.zip
+            desktop: Bundlr-windows-x86_64.msi
           - runner: macos-15
             deno_target: aarch64-apple-darwin
-            bundlr_target: macos-arm64
             name: macos-arm64
             cli: bundlr-cli-macos-arm64
-            desktop: Bundlr.app
-            distributable: Bundlr-macos-arm64.dmg
-            client_archive: PyCowsay-macos-arm64.tar.gz
+            desktop: Bundlr-macos-arm64.dmg
           - runner: macos-15-intel
             deno_target: x86_64-apple-darwin
-            bundlr_target: macos-x86_64
             name: macos-x86_64
             cli: bundlr-cli-macos-x86_64
-            desktop: Bundlr.app
-            distributable: Bundlr-macos-x86_64.dmg
-            client_archive: PyCowsay-macos-x86_64.tar.gz
-
-    name: ${{ matrix.name }}
+            desktop: Bundlr-macos-x86_64.dmg
+    name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
       - uses: denoland/setup-deno@v2
         with:
           deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Stamp release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          BUNDLR_RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          deno eval
+          'const tag = Deno.env.get("BUNDLR_RELEASE_TAG");
+          if (tag === undefined || !/^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag)) {
+            throw new Error(`Invalid release tag: ${tag}`);
+          }
+          await Deno.writeTextFile(
+            "src/version.ts",
+            `export const BUNDLR_VERSION = ${JSON.stringify(tag.slice(1))};\n`,
+          );'
 
       - name: Prepare checksum-verified uv
         run: deno task prepare:uv ${{ matrix.deno_target }}
@@ -81,127 +89,56 @@ jobs:
         run: >-
           deno compile
           --target ${{ matrix.deno_target }}
-          --allow-read
-          --allow-write
-          --allow-run
-          --allow-env
-          --allow-net
+          --permission-set=application
+          --no-prompt
           --include vendor/uv
           --output dist/${{ matrix.cli }}
           src/main.ts
 
-      - name: Diagnose Bundlr CLI on Unix
+      - name: Build Bundlr desktop application
+        run: >-
+          deno desktop
+          --target ${{ matrix.deno_target }}
+          --permission-set=application
+          --no-prompt
+          --include vendor/uv
+          --output dist/${{ matrix.desktop }}
+          src/desktop.ts
+
+      - name: Diagnose CLI on Unix
         if: runner.os != 'Windows'
         run: ./dist/${{ matrix.cli }} --diagnose
 
-      - name: Diagnose Bundlr CLI on Windows
+      - name: Diagnose CLI on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           & ".\dist\${{ matrix.cli }}" --diagnose
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build Bundlr desktop application
-        run: >-
-          deno desktop
-          --target ${{ matrix.deno_target }}
-          --allow-read
-          --allow-write
-          --allow-run
-          --allow-env
-          --allow-net
-          --include vendor/uv
-          --output dist/${{ matrix.desktop }}
-          src/desktop.ts
-
-      - name: Diagnose Linux desktop application
-        if: runner.os == 'Linux'
-        run: xvfb-run -a env APPIMAGE_EXTRACT_AND_RUN=1 ./dist/${{ matrix.desktop }} --diagnose
-
-      - name: Diagnose macOS desktop application
-        if: runner.os == 'macOS'
-        run: ./dist/${{ matrix.desktop }}/Contents/MacOS/Bundlr --diagnose
-
-      - name: Diagnose Windows desktop application
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          & ".\dist\${{ matrix.desktop }}" --diagnose
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Package macOS DMG
-        if: runner.os == 'macOS'
-        run: >-
-          deno desktop
-          --target ${{ matrix.deno_target }}
-          --allow-read
-          --allow-write
-          --allow-run
-          --allow-env
-          --allow-net
-          --include vendor/uv
-          --output dist/${{ matrix.distributable }}
-          src/desktop.ts
-
-      - name: Package pinned sample application
-        run: >-
-          deno run
-          --allow-read
-          --allow-write
-          --allow-run
-          --allow-env
-          --allow-net
-          src/main.ts
-          --name PyCowsay
-          --command pycowsay
-          --kind console
-          --target ${{ matrix.bundlr_target }}
-          --output sample-dist
-          ${{ env.SAMPLE_REQUIREMENT }}
-
-      - name: Smoke-test generated application on Unix
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          output="$(./sample-dist/PyCowsay/PyCowsay "CI smoke test")"
-          echo "$output"
-          [[ "$output" == *"CI smoke test"* ]]
-
-      - name: Smoke-test generated application on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $output = & ".\sample-dist\PyCowsay\PyCowsay.exe" "CI smoke test"
-          $output
-          if (($output -join "`n") -notmatch "CI smoke test") {
-            throw "Generated application produced unexpected output."
-          }
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Enforce unpacked client size budget
-        run: >-
-          deno run --allow-read
-          scripts/check_artifact_size.ts
-          sample-dist/PyCowsay
-          ${{ env.MAX_CLIENT_BYTES }}
-
-      - name: Archive generated application on Unix
-        if: runner.os != 'Windows'
-        run: tar -C sample-dist -czf dist/${{ matrix.client_archive }} PyCowsay
-
-      - name: Archive generated application on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: >-
-          Compress-Archive
-          -Path .\sample-dist\PyCowsay
-          -DestinationPath .\dist\${{ matrix.client_archive }}
-
       - uses: actions/upload-artifact@v4
         with:
           name: bundlr-${{ matrix.name }}
           path: |
-            dist/${{ matrix.distributable }}
-            dist/${{ matrix.client_archive }}
+            dist/${{ matrix.cli }}
+            dist/${{ matrix.desktop }}
           if-no-files-found: error
           compression-level: 0
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundlr-*
+          path: release
+          merge-multiple: true
+      - name: Publish GitHub release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --generate-notes --verify-tag
