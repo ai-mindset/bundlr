@@ -8,8 +8,8 @@ Deno.test("infers a PyPI application name and command", () => {
     "example_app==1.2.3",
   ]);
   assertEquals(request.applicationName, "example_app");
-  assertEquals(request.command, "example-app");
-  assertEquals(request.applicationKind, "windowed");
+  assertEquals(request.command, "");
+  assertEquals(request.applicationKind, "auto");
   assertEquals(request.python, "3.12");
   assertEquals(request.targets, ["linux-x86_64"]);
   assertEquals(request.outputDirectory, "dist");
@@ -29,10 +29,6 @@ Deno.test("parses explicit packaging options", () => {
     "windows-x86_64",
     "--output",
     "client builds",
-    "--collect",
-    "textual",
-    "--collect",
-    "posting.data",
     "https://github.com/example/app.git",
   ]);
   assertEquals(request.applicationName, "Example App");
@@ -41,39 +37,36 @@ Deno.test("parses explicit packaging options", () => {
   assertEquals(request.python, "3.11");
   assertEquals(request.targets, ["windows-x86_64"]);
   assertEquals(request.outputDirectory, "client builds");
-  assertEquals(request.collectPackages, ["textual", "posting.data"]);
   assertEquals(request.source.kind, "git");
 });
 
-Deno.test("requires a name and command for Git sources", () => {
-  assertThrows(
-    () => parsePackageCliArgs(["https://github.com/example/app.git"]),
-    PackageCliUsageError,
-    "require --name",
-  );
-  assertThrows(
-    () =>
-      parsePackageCliArgs([
-        "--name",
-        "Example App",
-        "https://github.com/example/app.git",
-      ]),
-    PackageCliUsageError,
-    "require --command",
-  );
+Deno.test("infers a Git application name and auto-detects its command", () => {
+  const request = parsePackageCliArgs(["https://github.com/example/example-app.git@abc123"]);
+  assertEquals(request.applicationName, "example-app");
+  assertEquals(request.command, "");
 });
 
 Deno.test("rejects invalid kinds and targets", () => {
   assertThrows(
     () => parsePackageCliArgs(["--kind", "service", "example-app"]),
     PackageCliUsageError,
-    "console or windowed",
+    "auto, console, or windowed",
   );
   assertThrows(
     () => parsePackageCliArgs(["--target", "web", "example-app"]),
     PackageCliUsageError,
     "Unsupported package target",
   );
+});
+
+Deno.test("expands the all-target shortcut", () => {
+  const request = parsePackageCliArgs(["--target", "all", "example-app==1.0.0"]);
+  assertEquals(request.targets, [
+    "linux-x86_64",
+    "macos-arm64",
+    "macos-x86_64",
+    "windows-x86_64",
+  ]);
 });
 
 Deno.test("rejects unknown options and trailing arguments", () => {
