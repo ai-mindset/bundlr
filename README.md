@@ -1,84 +1,176 @@
-# Bundlr
+# Bundlr 📦
 
-Bundlr turns a Python application from PyPI or HTTPS Git into a self-contained native application
-that the recipient can run without installing Python, uv, Deno, or Bundlr.
+Bundlr turns a Python application from PyPI or HTTPS Git into a self-contained, double-clickable
+application for Windows, macOS, and Linux. Recipients do not need Python, uv, Deno, or Bundlr.
 
-Bundlr is a beta packaging tool. Generated applications must be tested on every target before they
-are delivered to clients.
+## Package an application
 
-## Workflow
+Open Bundlr, paste a pinned package source, select the targets, and click **Package**. Bundlr
+detects the application name, entry point, and console/GUI type when possible.
 
-1. Open Bundlr.
-2. Enter a pinned PyPI requirement or HTTPS Git URL.
-3. Enter the application name and Python entry point.
-4. Choose console or windowed mode.
-5. Click **Package**.
-
-The desktop application builds for its current platform. The CI workflow runs the same packaging
-pipeline on native Linux x64, Windows x64, macOS ARM64, and macOS Intel workers.
-
-The command-line equivalent is:
+CLI examples:
 
 ```sh
-bundlr \
-  --name "Example App" \
-  --command example-app \
-  --kind windowed \
-  --python 3.12 \
-  --target linux-x86_64 \
-  --output dist \
-  example-app==1.0.0
+bundlr --target all example-app==1.2.3
+
+bundlr --target all \
+  https://github.com/example/example-app.git@0123456789abcdef0123456789abcdef01234567
 ```
 
-Git example:
+Use `--name`, `--command`, or `--kind` only when automatic detection is ambiguous.
+
+Each target produces:
+
+- A relocatable application directory with a double-click launcher.
+- A client ZIP or `tar.gz` archive.
+- SHA-256 checksums, dependency inventory, licence notices, and build metadata.
+
+## Build Windows applications on Linux or macOS
+
+Run these commands from a Bundlr source checkout. Bundlr prepares its pinned `uv` executable
+automatically; the generated applications do not require Python, Deno, Bundlr, `uv`, or a virtual
+environment on the Windows machine.
+
+### GUI example: PipUI
 
 ```sh
-bundlr \
+deno task package \
+  --name PipUI \
+  --command pip-ui \
+  --kind windowed \
+  --python 3.12 \
+  --target windows-x86_64 \
+  --output dist/examples/pipui-0.2.0 \
+  "pip-ui-tkinter==0.2.0"
+```
+
+Send these two files to the Windows user:
+
+```text
+dist/examples/pipui-0.2.0/PipUI-windows-x86_64.zip
+dist/examples/pipui-0.2.0/PipUI-windows-x86_64.zip.sha256
+```
+
+After verifying the checksum and extracting the entire ZIP, double-click:
+
+```text
+PipUI-windows-x86_64\PipUI.exe
+```
+
+### CLI example: Black
+
+```sh
+deno task package \
   --name Black \
   --command black \
   --kind console \
-  https://github.com/psf/black.git
+  --python 3.12 \
+  --target windows-x86_64 \
+  --output dist/examples/black-26.5.1 \
+  "black==26.5.1"
 ```
 
-Applications with dynamic imports or package data can use reviewed collection hints:
+Send these two files to the Windows user:
+
+```text
+dist/examples/black-26.5.1/Black-windows-x86_64.zip
+dist/examples/black-26.5.1/Black-windows-x86_64.zip.sha256
+```
+
+After verifying the checksum and extracting the entire ZIP, run:
+
+```powershell
+.\Black-windows-x86_64\Black.exe --help
+.\Black-windows-x86_64\Black.exe --check C:\path\to\python-project
+```
+
+Bundlr refuses to overwrite a completed application. Use a new versioned output directory for a
+new release.
+
+### Verify an archive with SHA-256
+
+Keep the archive and its `.sha256` file in the same directory. Run the appropriate command from
+that directory, and extract the archive only after verification succeeds.
+
+Linux:
 
 ```sh
-bundlr \
-  --name Posting \
-  --command posting \
-  --kind console \
-  --collect textual \
-  --collect posting \
-  https://github.com/darrenburns/posting.git@56703a11513e8e74e681b4f859f31945b71e746f
+sha256sum --check PipUI-windows-x86_64.zip.sha256
 ```
 
-## How it works
+macOS:
 
-Bundlr uses a checksum-verified, pinned [uv](https://docs.astral.sh/uv/) executable to obtain the
-requested Python and create an isolated build environment. It inspects the package's standard
-`console_scripts` and `gui_scripts` metadata, generates a static launcher, and freezes the
-application with pinned [PyInstaller](https://pyinstaller.org/).
+```sh
+shasum -a 256 --check PipUI-windows-x86_64.zip.sha256
+```
 
-PyInstaller builds on the target operating system; it does not cross-compile applications. Bundlr
-therefore builds locally for the current platform and uses native CI workers for the complete target
-matrix.
+Windows PowerShell:
 
-The beta deliberately uses PyInstaller's `onedir` mode. It is more reliable than `onefile` because
-the application does not unpack itself into a temporary directory on every launch. CI archives the
-tested directory as ZIP on Windows and `tar.gz` on Linux and macOS.
+```powershell
+$archive = ".\PipUI-windows-x86_64.zip"
+$expected = ((Get-Content "$archive.sha256" -Raw).Trim() -split "\s+")[0]
+$actual = (Get-FileHash $archive -Algorithm SHA256).Hash
+if ($actual -ine $expected) { throw "SHA-256 verification failed" }
+Write-Host "SHA-256 verification passed"
+```
 
-## Verified beta status
+## Verified Linux-to-Windows applications
 
-- Strict TypeScript formatting, linting, type checking, and 34 unit tests pass.
-- A pinned PyCowsay package builds and runs on Linux without an installed Python environment.
-- The generated PyCowsay application is 35,059,154 bytes (33.44 MiB) unpacked.
-- Posting builds from an immutable Git commit with reviewed `textual` and `posting` collection hints,
-  starts under a minimal environment, and is 63,041,825 bytes (60.12 MiB) unpacked.
-- CI defines native builds and generated-application smoke tests for all four supported targets.
-- Generated client applications do not contain Bundlr, Deno, or uv.
+PipUI 0.2.0 and Black 26.5.1 were bundled on Linux, copied to a Windows machine without a Bundlr
+development environment, and launched successfully. PipUI opened as a normal desktop application:
 
-Native CI has not yet run for this rewrite. Windows and macOS support must be considered unverified
-until those jobs pass.
+![PipUI 0.2.0 running on Windows after being bundled on Linux](assets/pipui.png)
+
+Black ran as a normal Windows command-line executable:
+
+<details>
+<summary>Black 26.5.1 <code>--help</code> output captured on Windows</summary>
+
+```text
+C:\Users\user> .\black-26.5.1\Black-windows-x86_64\Black.exe --help
+Usage: Black.exe [OPTIONS] SRC ...
+
+  The uncompromising code formatter.
+
+Options:
+  -c, --code TEXT                 Format the code passed in as a string.
+  -l, --line-length INTEGER       How many characters per line to allow.
+                                  [default: 88]
+...
+  -h, --help                      Show this message and exit.
+```
+
+</details>
+
+## How cross-target packaging works
+
+Bundlr combines a checksum-pinned target
+[Python runtime](https://github.com/astral-sh/python-build-standalone) with target-compatible wheels
+selected by [uv](https://docs.astral.sh/uv/). It does not use PyInstaller or execute foreign target
+binaries while packaging.
+
+Supported applications are:
+
+- Pure Python; or
+- Dependent on native packages that publish wheels for every selected target.
+
+Bundlr rejects missing target wheels and Git projects that build host-specific native code. This
+prevents a Linux binary from being accidentally delivered in a Windows or macOS application.
+
+## Prototype status
+
+- One Linux command successfully generated Linux x64, Windows x64, macOS ARM64, and macOS Intel
+  archives.
+- The Linux application launched successfully; its archive and internal file checksums passed before
+  and after launch, while foreign executables were verified structurally.
+- PipUI 0.2.0 and Black 26.5.1 were bundled on Linux and launched successfully on Windows without a
+  separately installed Python runtime or virtual environment.
+- The four client archives measured 23–33 MiB.
+- Formatting, linting, type checking, and the test suite pass.
+- Native macOS launch testing remains required before client release.
+
+Bundlr and generated applications are currently unsigned. Corporate controls, SmartScreen, or
+Gatekeeper may require IT approval; use [IT_SUPPORT_REPORT.md](IT_SUPPORT_REPORT.md).
 
 ## Development
 
@@ -87,41 +179,12 @@ Requires Deno 2.9.4 or later.
 ```sh
 deno task check
 deno task test
-deno task prepare:uv
-```
-
-Run Bundlr from source:
-
-```sh
-deno task start -- --kind console pycowsay==0.0.0.2
-```
-
-Build Bundlr's desktop application:
-
-```sh
+deno task build:cli
 deno task build
 ```
 
-## Current limitations
+`build:cli` creates the command-line executable under `dist`. `build` creates the host desktop
+package there as `Bundlr.AppImage`, `Bundlr.msi`, or `Bundlr.dmg`.
 
-- Bundlr and generated applications are unsigned. Corporate application-control approval may still
-  be required.
-- The desktop UI builds only for its current platform. Remote submission of all-target builds is not
-  implemented.
-- Application name and entry point are not yet auto-detected in the desktop UI.
-- Some Python applications require package-specific PyInstaller hooks, hidden imports, data files,
-  or native libraries. Repeatable `--collect` hints are available for reviewed compatibility
-  recipes.
-- Generated size depends on the application. The 60 MB CI budget guards the small reference fixture;
-  it is not a universal limit for dependency-heavy applications.
-- Linux compatibility depends on the system libraries used by the native build worker.
-- macOS application signing, notarisation, and Windows code signing are not implemented.
-- `deno desktop` remains experimental.
-
-## Security
-
-Packaging installs and analyses third-party Python code. Use pinned, reviewed sources and trusted
-build workers. Dependency isolation is not a security sandbox. Bundlr refuses to overwrite an
-existing output artifact and executes subprocesses without a shell.
-
-See [IT_SUPPORT_REPORT.md](IT_SUPPORT_REPORT.md) for corporate deployment and allow-listing details.
+GitHub Actions is configured to verify and build Bundlr on demand and to publish Bundlr releases
+when a `v*` tag is pushed. Client applications are built locally by Bundlr and do not depend on CI.
