@@ -1,4 +1,4 @@
-import { packageApplication } from "./core/package_application.ts";
+import { packageTargets } from "./core/package_targets.ts";
 import { currentTarget } from "./core/target.ts";
 import type { ApplicationKind, PackageRequest } from "./domain/package_request.ts";
 import { parsePackageSource } from "./domain/source.ts";
@@ -29,11 +29,11 @@ function startDesktop(): void {
 
   window.bind("packageApplication", async (input: unknown) => {
     if (activeBuild !== undefined) throw new Error("A package build is already running.");
-    const request = decodeRequest(input, target);
+    const request = decodeRequest(input);
     const controller = new AbortController();
     activeBuild = controller;
     try {
-      return await packageApplication(request, {
+      return await packageTargets(request, {
         stdout: (text) => sendOutput(window, "stdout", text),
         stderr: (text) => sendOutput(window, "stderr", text),
       }, controller.signal);
@@ -58,15 +58,15 @@ function sendOutput(
     .catch(() => undefined);
 }
 
-function decodeRequest(input: unknown, target: PackageRequest["targets"][number]): PackageRequest {
+function decodeRequest(input: unknown): PackageRequest {
   if (typeof input !== "object" || input === null) {
     throw new Error("Invalid package request.");
   }
   const value = input as Record<string, unknown>;
-  const required = ["source", "applicationName", "command"] as const;
+  const required = ["source"] as const;
   for (const field of required) {
     if (typeof value[field] !== "string") {
-      throw new Error("Package source, application name, and command are required.");
+      throw new Error("Package source is required.");
     }
   }
   const applicationKind = decodeApplicationKind(value.applicationKind);
@@ -77,25 +77,49 @@ function decodeRequest(input: unknown, target: PackageRequest["targets"][number]
       value.outputDirectory.length > 0
     ? value.outputDirectory
     : "dist";
-  const collectPackages = typeof value.collectPackages === "string"
-    ? value.collectPackages.split(",").map((name) => name.trim()).filter(Boolean)
-    : [];
-
+  const source = parsePackageSource(value.source as string);
+  const applicationName =
+    typeof value.applicationName === "string" && value.applicationName.length > 0
+      ? value.applicationName
+      : inferApplicationName(source);
   return {
-    source: parsePackageSource(value.source as string),
-    applicationName: value.applicationName as string,
+    source,
+    applicationName,
     applicationKind,
-    command: value.command as string,
+    command: typeof value.command === "string" ? value.command : "",
     python,
-    targets: [target],
+    targets: decodeTargets(value.targets),
     outputDirectory,
-    ...(collectPackages.length === 0 ? {} : { collectPackages }),
   };
 }
 
+function inferApplicationName(source: ReturnType<typeof parsePackageSource>): string {
+  const name = source.kind === "pypi"
+    ? /^([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(source.requirement)?.[1]
+    : source.url.pathname.split("/").filter(Boolean).at(-1)?.split("@", 1)[0]?.replace(
+      /\.git$/,
+      "",
+    );
+  if (name === undefined) throw new Error("Enter an application name.");
+  return name;
+}
+
+function decodeTargets(value: unknown): PackageRequest["targets"] {
+  const supported = new Set<PackageRequest["targets"][number]>([
+    "linux-x86_64",
+    "macos-arm64",
+    "macos-x86_64",
+    "windows-x86_64",
+  ]);
+  if (!Array.isArray(value) || value.length === 0 || value.some((item) => !supported.has(item))) {
+    throw new Error("Select at least one supported target platform.");
+  }
+  return value as PackageRequest["targets"];
+}
+
 function decodeApplicationKind(value: unknown): ApplicationKind {
-  if (value === "console" || value === "windowed") return value;
-  throw new Error("Application kind must be console or windowed.");
+  if (value === "auto" || value === "console" || value === "windowed") return value;
+  throw new Error("Application kind must be auto, console, or windowed.");
 }
 
 function page(target: string): string {
@@ -119,6 +143,11 @@ function page(target: string): string {
       background: Field; color: FieldText;
     }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    fieldset { margin: 14px 0 0; padding: 10px 12px; border: 1px solid GrayText; border-radius: 6px; }
+    legend { font-weight: 600; }
+    .targets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .targets label { display: flex; gap: 8px; align-items: center; margin: 0; font-weight: 400; }
+    .targets input { width: auto; }
     .actions { display: flex; gap: 10px; margin: 18px 0; }
     details { margin-top: 14px; }
     summary { cursor: pointer; font-weight: 600; }
@@ -144,17 +173,18 @@ function page(target: string): string {
       <div class="row">
         <div>
           <label for="applicationName">Application name</label>
-          <input id="applicationName" required placeholder="Example App">
+          <input id="applicationName" placeholder="Auto-detect">
         </div>
         <div>
           <label for="command">Application entry point</label>
-          <input id="command" required placeholder="example-app">
+          <input id="command" placeholder="Auto-detect">
         </div>
       </div>
       <div class="row">
         <div>
           <label for="applicationKind">Application kind</label>
           <select id="applicationKind">
+            <option value="auto">Auto-detect</option>
             <option value="windowed">Windowed</option>
             <option value="console">Console</option>
           </select>
@@ -166,11 +196,15 @@ function page(target: string): string {
       </div>
       <label for="outputDirectory">Output directory</label>
       <input id="outputDirectory" value="dist">
-      <details>
-        <summary>Advanced packaging</summary>
-        <label for="collectPackages">Collect packages</label>
-        <input id="collectPackages" placeholder="textual, posting">
-      </details>
+      <fieldset>
+        <legend>Target platforms</legend>
+        <div class="targets">
+          ${targetOption("linux-x86_64", "Linux x64", target)}
+          ${targetOption("windows-x86_64", "Windows x64", target)}
+          ${targetOption("macos-arm64", "macOS Apple Silicon", target)}
+          ${targetOption("macos-x86_64", "macOS Intel", target)}
+        </div>
+      </fieldset>
       <div class="actions">
         <button id="package" type="submit">Package</button>
         <button id="cancel" type="button" disabled>Cancel</button>
@@ -201,16 +235,17 @@ function page(target: string): string {
       packageButton.disabled = true;
       cancel.disabled = false;
       try {
-        const result = await bindings.packageApplication({
+        const results = await bindings.packageApplication({
           source: document.querySelector("#source").value,
           applicationName: document.querySelector("#applicationName").value,
           command: document.querySelector("#command").value,
           applicationKind: document.querySelector("#applicationKind").value,
           python: document.querySelector("#python").value,
           outputDirectory: document.querySelector("#outputDirectory").value,
-          collectPackages: document.querySelector("#collectPackages").value,
+          targets: [...document.querySelectorAll('input[name="target"]:checked')]
+            .map((input) => input.value),
         });
-        status.textContent = "Created " + result.artifactPath + ".";
+        status.textContent = "Created " + results.map((result) => result.archivePath).join(", ") + ".";
       } catch (error) {
         status.textContent = "Error: " + (error.message ?? String(error));
       } finally {
@@ -226,4 +261,10 @@ function page(target: string): string {
   </script>
 </body>
 </html>`;
+}
+
+function targetOption(value: string, label: string, current: string): string {
+  return `<label><input type="checkbox" name="target" value="${value}" ${
+    value === current ? "checked" : ""
+  }>${label}</label>`;
 }

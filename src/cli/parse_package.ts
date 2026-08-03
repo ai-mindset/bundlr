@@ -20,11 +20,10 @@ export class PackageCliUsageError extends Error {
 export function parsePackageCliArgs(args: readonly string[]): PackageRequest {
   let applicationName: string | undefined;
   let command: string | undefined;
-  let applicationKind: ApplicationKind = "windowed";
+  let applicationKind: ApplicationKind = "auto";
   let python = "3.12";
-  let target = currentTarget();
+  const targets: TargetPlatform[] = [];
   let outputDirectory = "dist";
-  const collectPackages: string[] = [];
   let index = 0;
 
   while (index < args.length) {
@@ -52,14 +51,11 @@ export function parsePackageCliArgs(args: readonly string[]): PackageRequest {
         break;
       case "--target":
       case "-t":
-        target = parseTarget(value);
+        targets.push(...parseTargets(value));
         break;
       case "--output":
       case "-o":
         outputDirectory = value;
-        break;
-      case "--collect":
-        collectPackages.push(value);
         break;
       default:
         throw new PackageCliUsageError(`Unknown package option: ${option}`);
@@ -78,23 +74,19 @@ export function parsePackageCliArgs(args: readonly string[]): PackageRequest {
   const source = parsePackageSource(sourceInput);
   const inferredName = source.kind === "pypi"
     ? inferDistributionName(source.requirement)
-    : undefined;
+    : inferGitName(source.url);
   if (applicationName === undefined && inferredName === undefined) {
-    throw new PackageCliUsageError("Git sources require --name <application-name>.");
-  }
-  if (command === undefined && inferredName === undefined) {
-    throw new PackageCliUsageError("Git sources require --command <entry-point>.");
+    throw new PackageCliUsageError("Could not infer the application name; use --name <name>.");
   }
 
   return {
     source,
     applicationName: applicationName ?? inferredName!,
     applicationKind,
-    command: command ?? normalizeCommand(inferredName!),
+    command: command ?? "",
     python,
-    targets: [target],
+    targets: targets.length === 0 ? [currentTarget()] : targets,
     outputDirectory,
-    ...(collectPackages.length === 0 ? {} : { collectPackages }),
   };
 }
 
@@ -111,12 +103,13 @@ function requiredOptionValue(
 }
 
 function parseApplicationKind(value: string): ApplicationKind {
-  if (value === "console" || value === "windowed") return value;
-  throw new PackageCliUsageError("--kind must be console or windowed.");
+  if (value === "auto" || value === "console" || value === "windowed") return value;
+  throw new PackageCliUsageError("--kind must be auto, console, or windowed.");
 }
 
-function parseTarget(value: string): TargetPlatform {
-  if (TARGETS.includes(value as TargetPlatform)) return value as TargetPlatform;
+function parseTargets(value: string): readonly TargetPlatform[] {
+  if (value === "all") return TARGETS;
+  if (TARGETS.includes(value as TargetPlatform)) return [value as TargetPlatform];
   throw new PackageCliUsageError(`Unsupported package target: ${value}`);
 }
 
@@ -124,6 +117,6 @@ function inferDistributionName(requirement: string): string | undefined {
   return /^([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(requirement)?.[1];
 }
 
-function normalizeCommand(name: string): string {
-  return name.toLowerCase().replace(/[_.]+/g, "-");
+function inferGitName(url: URL): string | undefined {
+  return url.pathname.split("/").filter(Boolean).at(-1)?.split("@", 1)[0]?.replace(/\.git$/, "");
 }

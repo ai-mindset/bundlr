@@ -1,7 +1,8 @@
 import { PackageCliUsageError, parsePackageCliArgs } from "./cli/parse_package.ts";
 import { InvalidEntryPointError } from "./core/entry_point.ts";
-import { EntryPointNotFoundError } from "./core/inspect_entry_point.ts";
-import { packageApplication, PackagingError } from "./core/package_application.ts";
+import { EntryPointNotFoundError } from "./core/installed_entry_point.ts";
+import { PackagingError } from "./core/package_application.ts";
+import { packageTargets } from "./core/package_targets.ts";
 import { UnsupportedTargetError } from "./core/target.ts";
 import { InvalidPackageRequestError } from "./domain/package_request.ts";
 import { InvalidPackageSourceError } from "./domain/source.ts";
@@ -17,13 +18,12 @@ Usage:
   bundlr package [OPTIONS] <PACKAGE>
 
 Options:
-  -n, --name <NAME>       Application name (required for Git sources)
-  -c, --command <NAME>    Python application entry point (required for Git sources)
-  -k, --kind <KIND>       windowed or console (default: windowed)
+  -n, --name <NAME>       Application name (default: inferred from source)
+  -c, --command <NAME>    Python application entry point (default: auto-detect)
+  -k, --kind <KIND>       auto, windowed, or console (default: auto)
   -p, --python <VERSION>  Python version (default: 3.12)
-  -t, --target <TARGET>   Native build target (default: current platform)
+  -t, --target <TARGET>   Build target; repeatable, or "all" (default: current platform)
   -o, --output <PATH>     Output directory (default: dist)
-      --collect <PACKAGE> Collect all modules/data for a package; repeatable
   -h, --help              Show this help
   -V, --version           Show the Bundlr version
 
@@ -55,11 +55,13 @@ export async function main(args: readonly string[]): Promise<number> {
 
     const request = parsePackageCliArgs(packageArgs);
     const encoder = new TextEncoder();
-    const result = await packageApplication(request, {
+    const results = await packageTargets(request, {
       stdout: (text) => Deno.stdout.writeSync(encoder.encode(text)),
       stderr: (text) => Deno.stderr.writeSync(encoder.encode(text)),
     });
-    console.log(`Created ${result.artifactPath} for ${result.target}.`);
+    for (const result of results) {
+      console.log(`Created ${result.archivePath} for ${result.target} (${result.sha256}).`);
+    }
     return 0;
   } catch (error) {
     if (isUsageError(error)) {
