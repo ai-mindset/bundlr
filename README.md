@@ -1,4 +1,4 @@
-# Bundlr
+# Bundlr 📦
 
 Bundlr turns a Python application from PyPI or HTTPS Git into a self-contained, double-clickable
 application for Windows, macOS, and Linux. Recipients do not need Python, uv, Deno, or Bundlr.
