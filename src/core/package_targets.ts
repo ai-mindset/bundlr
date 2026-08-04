@@ -14,8 +14,22 @@ export async function packageTargets(
   for (const target of request.targets) {
     events.stderr?.(`\nPackaging ${target}...\n`);
     const result = await packageApplication({ ...request, targets: [target] }, events, signal);
-    const archive = await createClientArchive(result);
-    results.push({ ...result, ...archive });
+    try {
+      const archive = await createClientArchive(result);
+      results.push({ ...result, ...archive });
+    } catch (archiveError) {
+      try {
+        await Deno.remove(result.artifactPath, { recursive: true });
+      } catch (cleanupError) {
+        if (!(cleanupError instanceof Deno.errors.NotFound)) {
+          throw new AggregateError(
+            [archiveError, cleanupError],
+            `Archive creation failed and Bundlr could not remove ${result.artifactPath}.`,
+          );
+        }
+      }
+      throw archiveError;
+    }
   }
   return results;
 }

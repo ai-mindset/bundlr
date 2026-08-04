@@ -14,18 +14,40 @@ export async function createClientArchive(result: PackageResult): Promise<Client
     ? result.artifactPath.slice(0, -".app".length)
     : result.artifactPath;
   const archivePath = `${archiveBase}${extension}`;
-  await requireAbsent(archivePath);
-  if (result.target === "windows-x86_64") {
-    await createZip(result.artifactPath, archivePath);
-  } else {
-    await createTarGz(result.artifactPath, archivePath);
-  }
-  const sha256 = await fileSha256(archivePath);
   const checksumPath = `${archivePath}.sha256`;
-  await Deno.writeTextFile(checksumPath, `${sha256}  ${basename(archivePath)}\n`, {
-    createNew: true,
+  await Promise.all([requireAbsent(archivePath), requireAbsent(checksumPath)]);
+
+  const stagingDirectory = await Deno.makeTempDir({
+    dir: dirname(archivePath),
+    prefix: ".bundlr-archive-",
   });
-  return { archivePath, checksumPath, sha256 };
+  const stagedArchive = join(stagingDirectory, basename(archivePath));
+  const stagedChecksum = join(stagingDirectory, basename(checksumPath));
+  let archivePublished = false;
+  let checksumPublished = false;
+  try {
+    if (result.target === "windows-x86_64") {
+      await createZip(result.artifactPath, stagedArchive);
+    } else {
+      await createTarGz(result.artifactPath, stagedArchive);
+    }
+    const sha256 = await fileSha256(stagedArchive);
+    await Deno.writeTextFile(stagedChecksum, `${sha256}  ${basename(archivePath)}\n`, {
+      createNew: true,
+    });
+
+    await Deno.rename(stagedArchive, archivePath);
+    archivePublished = true;
+    await Deno.rename(stagedChecksum, checksumPath);
+    checksumPublished = true;
+    return { archivePath, checksumPath, sha256 };
+  } catch (error) {
+    if (checksumPublished) await Deno.remove(checksumPath).catch(() => undefined);
+    if (archivePublished) await Deno.remove(archivePath).catch(() => undefined);
+    throw error;
+  } finally {
+    await Deno.remove(stagingDirectory, { recursive: true }).catch(() => undefined);
+  }
 }
 
 async function createZip(source: string, destination: string): Promise<void> {

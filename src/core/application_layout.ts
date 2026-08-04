@@ -111,7 +111,7 @@ async function createUnixLauncher(
   await Deno.writeTextFile(
     executable,
     `#!/bin/sh\nROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n` +
-      `exec "$ROOT/runtime/${distribution.executablePath}" -I "$ROOT/bundlr_launcher.py" "$@"\n`,
+      `exec "$ROOT/runtime/${distribution.executablePath}" -I -B "$ROOT/bundlr_launcher.py" "$@"\n`,
     { createNew: true, mode: 0o755 },
   );
   await Deno.chmod(executable, 0o755);
@@ -136,7 +136,7 @@ async function createMacosLauncher(
   await Deno.writeTextFile(
     executable,
     `#!/bin/sh\nROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../Resources" && pwd)\n` +
-      `exec "$ROOT/runtime/${distribution.executablePath}" -I "$ROOT/bundlr_launcher.py" "$@"\n`,
+      `exec "$ROOT/runtime/${distribution.executablePath}" -I -B "$ROOT/bundlr_launcher.py" "$@"\n`,
     { createNew: true, mode: 0o755 },
   );
   await Deno.chmod(executable, 0o755);
