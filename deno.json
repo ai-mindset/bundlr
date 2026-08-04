@@ -16,14 +16,56 @@
       "tags": ["recommended"]
     }
   },
+  "desktop": {
+    "app": {
+      "name": "Bundlr",
+      "identifier": "io.github.ai-mindset.bundlr"
+    },
+    "output": {
+      "linux": "dist/Bundlr.AppImage",
+      "macos": "dist/Bundlr.dmg",
+      "windows": "dist/Bundlr.msi"
+    }
+  },
+  "permissions": {
+    "application": {
+      "read": true,
+      "write": true,
+      "run": true,
+      "env": [
+        "BUNDLR_UV_EXECUTABLE",
+        "HOME",
+        "LOCALAPPDATA",
+        "XDG_CACHE_HOME"
+      ],
+      "net": [
+        "github.com",
+        "release-assets.githubusercontent.com"
+      ]
+    },
+    "prepare-uv": {
+      "read": true,
+      "write": true,
+      "run": ["tar"],
+      "net": [
+        "github.com",
+        "release-assets.githubusercontent.com"
+      ]
+    },
+    "tests": {
+      "read": true,
+      "write": true,
+      "run": true
+    }
+  },
   "tasks": {
     "build": "deno task desktop:build",
-    "build:cli": "deno task prepare:uv && deno compile --allow-read --allow-write --allow-run --allow-env --allow-net --include vendor/uv --output dist/bundlr src/main.ts",
+    "build:cli": "deno task prepare:uv && deno compile --permission-set=application --no-prompt --include vendor/uv --output dist/bundlr src/main.ts",
     "check": "deno fmt --check && deno lint && deno check src/main.ts src/desktop.ts scripts/prepare_uv.ts scripts/check_artifact_size.ts",
-    "desktop:build": "deno task prepare:uv && deno desktop --allow-read --allow-write --allow-run --allow-env --allow-net --include vendor/uv --output dist/bundlr-desktop.AppImage src/desktop.ts",
-    "desktop:dev": "deno desktop --hmr --allow-read --allow-write --allow-run --allow-env --allow-net src/desktop.ts",
-    "prepare:uv": "deno run --allow-net=github.com,release-assets.githubusercontent.com --allow-read --allow-write --allow-run=tar --allow-env scripts/prepare_uv.ts",
-    "test": "deno test --allow-read --allow-write --allow-run --allow-env",
-    "start": "deno run --allow-read --allow-write --allow-run --allow-env --allow-net src/main.ts"
+    "desktop:build": "deno task prepare:uv && deno desktop --permission-set=application --no-prompt --include vendor/uv src/desktop.ts",
+    "desktop:dev": "deno desktop --hmr --permission-set=application --no-prompt src/desktop.ts",
+    "prepare:uv": "deno run --permission-set=prepare-uv --no-prompt scripts/prepare_uv.ts",
+    "test": "deno test --permission-set=tests --no-prompt",
+    "start": "deno run --permission-set=application --no-prompt src/main.ts"
   }
 }
