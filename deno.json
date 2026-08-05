@@ -61,9 +61,13 @@
   "tasks": {
     "build": "deno task desktop:build",
     "build:cli": "deno task prepare:uv && deno compile --permission-set=application --no-prompt --include vendor/uv --output dist/bundlr src/main.ts",
+    "build:cli:windows": "deno task prepare:uv x86_64-pc-windows-msvc && deno compile --target x86_64-pc-windows-msvc --permission-set=application --no-prompt --include vendor/uv/uv.exe --include vendor/uv/uv.exe.sha256 --output dist/bundlr-windows-x86_64.exe src/main.ts",
     "check": "deno fmt --check && deno lint && deno check src/main.ts src/desktop.ts scripts/prepare_uv.ts scripts/check_artifact_size.ts",
     "desktop:build": "deno task prepare:uv && deno desktop --permission-set=application --no-prompt --include vendor/uv src/desktop.ts",
     "desktop:dev": "deno desktop --hmr --permission-set=application --no-prompt src/desktop.ts",
+    "package": "deno run --permission-set=application --no-prompt src/main.ts",
+    "package:windows": "deno task package --target windows-x86_64",
+    "package:windows:gui": "deno task package:windows --kind windowed",
     "prepare:uv": "deno run --permission-set=prepare-uv --no-prompt scripts/prepare_uv.ts",
     "test": "deno test --permission-set=tests --no-prompt",
     "start": "deno run --permission-set=application --no-prompt src/main.ts"

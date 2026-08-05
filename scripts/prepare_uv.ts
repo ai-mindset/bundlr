@@ -1,3 +1,4 @@
+import { Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "jsr:@zip-js/zip-js@2.8.34";
 import { UV_CHECKSUM_MANIFEST_SHA256, UV_VERSION } from "../src/uv_version.ts";
 
 const RELEASE_BASE = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}`;
@@ -27,9 +28,12 @@ async function main(args: readonly string[]): Promise<void> {
     await verify(archive, expectedArtifactChecksum, artifact);
     const archivePath = `${temporaryDirectory}/${artifact}`;
     await Deno.writeFile(archivePath, archive);
-    await extract(archivePath, temporaryDirectory);
-
     const executableName = target.includes("windows") ? "uv.exe" : "uv";
+    if (artifact.endsWith(".zip")) {
+      await extractZipExecutable(archive, temporaryDirectory, executableName);
+    } else {
+      await extract(archivePath, temporaryDirectory);
+    }
     const extractedExecutable = await findFile(temporaryDirectory, executableName);
     const outputDirectory = "vendor/uv";
     const outputExecutable = `${outputDirectory}/${executableName}`;
@@ -72,6 +76,28 @@ function parseChecksum(manifest: string, artifact: string): string {
     if (match?.[2] === artifact) return match[1]!.toLowerCase();
   }
   throw new Error(`No checksum found for ${artifact}.`);
+}
+
+async function extractZipExecutable(
+  archive: Uint8Array,
+  destination: string,
+  name: string,
+): Promise<void> {
+  const reader = new ZipReader(new Uint8ArrayReader(archive));
+  try {
+    for (const entry of await reader.getEntries()) {
+      if (entry.directory || entry.filename.split("/").at(-1) !== name) continue;
+      await Deno.writeFile(
+        `${destination}/${name}`,
+        await entry.getData(new Uint8ArrayWriter()),
+        { createNew: true },
+      );
+      return;
+    }
+    throw new Deno.errors.NotFound(`${name} was not present in the uv archive.`);
+  } finally {
+    await reader.close();
+  }
 }
 
 async function extract(archive: string, destination: string): Promise<void> {

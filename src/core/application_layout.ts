@@ -1,4 +1,5 @@
-import { basename, join } from "jsr:@std/path@1.1.2";
+import { TextReader, Uint8ArrayWriter, ZipWriter } from "jsr:@zip-js/zip-js@2.8.34";
+import { join } from "jsr:@std/path@1.1.2";
 import type { PackageRequest } from "../domain/package_request.ts";
 import type { PythonEntryPoint } from "./entry_point.ts";
 import type { PythonDistribution } from "./python_distribution.ts";
@@ -34,7 +35,7 @@ export async function createApplicationLauncher(
 ): Promise<void> {
   const target = request.targets[0]!;
   if (target === "windows-x86_64") {
-    await createWindowsLauncher(request, paths, distribution, entryPoint);
+    await createWindowsLauncher(request, paths, entryPoint);
   } else if (target.startsWith("macos-")) {
     await createMacosLauncher(request, paths, distribution, entryPoint);
   } else {
@@ -46,6 +47,7 @@ function pythonInvocation(entryPoint: PythonEntryPoint, packagesExpression: stri
   const access = entryPoint.attributes.map((attribute) => `.${attribute}`).join("");
   return [
     "import sys",
+    "import site",
     packagesExpression,
     `import ${entryPoint.module} as _bundlr_module`,
     `raise SystemExit(_bundlr_module${access}())`,
@@ -56,43 +58,40 @@ function pythonInvocation(entryPoint: PythonEntryPoint, packagesExpression: stri
 async function createWindowsLauncher(
   request: PackageRequest,
   paths: ApplicationPaths,
-  distribution: PythonDistribution,
   entryPoint: PythonEntryPoint,
 ): Promise<void> {
-  const sourceName = request.applicationKind === "windowed" ? "pythonw.exe" : "python.exe";
+  const windowed = request.applicationKind === "windowed";
+  const sourceName = windowed ? "pythonw.exe" : "python.exe";
+  const stubName = windowed ? "w64.exe" : "t64.exe";
   const executableName = `${request.applicationName}.exe`;
-  await Deno.copyFile(join(paths.runtime, sourceName), join(paths.root, executableName));
-  await copyWindowsRuntimeLibraries(paths.runtime, paths.root);
-
-  const pthName = `${basename(executableName, ".exe")}._pth`;
-  await Deno.writeTextFile(
-    join(paths.root, pthName),
-    [
-      `runtime/python${distribution.pythonVersion.replaceAll(".", "").slice(0, 3)}.zip`,
-      "runtime/DLLs",
-      "runtime/Lib",
-      "packages",
-      ".",
-      "import site",
-      "",
-    ].join("\r\n"),
-    { createNew: true },
+  const stub = await Deno.readFile(
+    join(paths.runtime, "Lib", "site-packages", "pip", "_vendor", "distlib", stubName),
   );
-  await Deno.writeTextFile(
-    join(paths.root, "sitecustomize.py"),
-    pythonInvocation(
-      entryPoint,
-      "sys.path.insert(0, __file__.rsplit('\\\\', 1)[0] + '\\\\packages')",
-    ),
-    { createNew: true },
+  const shebang = new TextEncoder().encode(
+    `#!<launcher_dir>\\runtime\\${sourceName} -I -B\n`,
   );
-}
-
-async function copyWindowsRuntimeLibraries(runtime: string, destination: string): Promise<void> {
-  for await (const entry of Deno.readDir(runtime)) {
-    if (!entry.isFile || !entry.name.toLowerCase().endsWith(".dll")) continue;
-    await Deno.copyFile(join(runtime, entry.name), join(destination, entry.name));
-  }
+  const main = pythonInvocation(
+    entryPoint,
+    "import os\n" +
+      "site.addsitedir(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'packages'))",
+  );
+  const zipWriter = new ZipWriter(new Uint8ArrayWriter(), {
+    level: 0,
+    zip64: false,
+  });
+  await zipWriter.add("__main__.py", new TextReader(main), {
+    dataDescriptor: false,
+    extendedTimestamp: false,
+    lastModDate: new Date("2000-01-01T00:00:00.000Z"),
+    level: 0,
+    zip64: false,
+  });
+  const archive = await zipWriter.close(undefined, { zip64: false });
+  const launcher = new Uint8Array(stub.length + shebang.length + archive.length);
+  launcher.set(stub);
+  launcher.set(shebang, stub.length);
+  launcher.set(archive, stub.length + shebang.length);
+  await Deno.writeFile(join(paths.root, executableName), launcher, { createNew: true });
 }
 
 async function createUnixLauncher(
@@ -104,7 +103,7 @@ async function createUnixLauncher(
   const launcher = join(paths.root, "bundlr_launcher.py");
   await Deno.writeTextFile(
     launcher,
-    pythonInvocation(entryPoint, "sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/packages')"),
+    pythonInvocation(entryPoint, "site.addsitedir(__file__.rsplit('/', 1)[0] + '/packages')"),
     { createNew: true },
   );
   const executable = join(paths.root, request.applicationName);
@@ -129,7 +128,7 @@ async function createMacosLauncher(
   const launcher = join(paths.root, "bundlr_launcher.py");
   await Deno.writeTextFile(
     launcher,
-    pythonInvocation(entryPoint, "sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/packages')"),
+    pythonInvocation(entryPoint, "site.addsitedir(__file__.rsplit('/', 1)[0] + '/packages')"),
     { createNew: true },
   );
   const executable = join(macos, request.applicationName);
