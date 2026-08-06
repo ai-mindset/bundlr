@@ -116,8 +116,8 @@ Write-Host "SHA-256 verification passed"
 
 ## Verified Linux-to-Windows applications
 
-PipUI 0.2.0 and Black 26.5.1 were bundled on Linux, copied to a Windows machine without a Bundlr
-development environment, and launched successfully. PipUI opened as a normal desktop application:
+PipUI 0.2.0 and Black 26.5.1 were bundled on Linux, copied to a Windows machine without a Python installation, 
+and launched successfully. PipUI opened as a normal desktop application:
 
 ![PipUI 0.2.0 running on Windows after being bundled on Linux](assets/pipui.png)
 
@@ -156,21 +156,6 @@ Supported applications are:
 
 Bundlr rejects missing target wheels and Git projects that build host-specific native code. This
 prevents a Linux binary from being accidentally delivered in a Windows or macOS application.
-
-## Current status
-
-- One Linux command successfully generated Linux x64, Windows x64, macOS ARM64, and macOS Intel
-  archives.
-- The Linux application launched successfully; its archive and internal file checksums passed before
-  and after launch, while foreign executables were verified structurally.
-- PipUI 0.2.0 and Black 26.5.1 were bundled on Linux and launched successfully on Windows without a
-  separately installed Python runtime or virtual environment.
-- The four client archives measured 23–33 MiB.
-- Formatting, linting, type checking, and the test suite pass.
-- Native macOS launch testing remains required before client release.
-
-Bundlr and generated applications are currently unsigned. Corporate controls, SmartScreen, or
-Gatekeeper may require IT approval; use [IT_SUPPORT_REPORT.md](IT_SUPPORT_REPORT.md).
 
 ## Development
 
