@@ -1,92 +1,191 @@
-# bundlr 📦
+# Bundlr 📦
 
-**Zero-installation Python CLI runner** — run any PyPI package or GitHub/Codeberg/GitLab repository instantly, with no host-side installation required.
+Bundlr turns a Python application from PyPI or HTTPS Git into a self-contained, double-clickable
+application for Windows, macOS, and Linux. Recipients do not need Python, uv, Deno, or Bundlr.
 
-## Quick start
+## Package an application
 
-### GUI mode (double-click)
-1. Download the appropriate executable from the **Releases** page.
-2. Double-click to launch the GUI.
-3. Enter a PyPI package name or Git URL (e.g. `cowsay`) and optional arguments.
+Run Bundlr with a pinned PyPI requirement or HTTPS Git source. Bundlr detects the application
+name, entry point, and console/GUI type when possible.
 
-### Command line
-```bash
-# Run a PyPI package
-bundlr cowsay -t "Hello World"
+CLI examples:
 
-# Run from a Git repository
-bundlr https://github.com/psf/black --help
-bundlr https://codeberg.org/user/repo
+```sh
+bundlr --target all example-app==1.2.3
+
+bundlr --target all \
+  https://github.com/example/example-app.git@0123456789abcdef0123456789abcdef01234567
 ```
 
-## Build mode — create portable executables
+Use `--name`, `--command`, or `--kind` only when automatic detection is ambiguous.
 
-> **Status**: Windows executables are functional. Linux/macOS build support is in active development 🚧.
+Each target produces:
 
-```bash
-# Build for the default target (linux-x86_64)
-bundlr build cowsay
+- A relocatable application directory with a double-click launcher.
+- A client ZIP or `tar.gz` archive.
+- SHA-256 checksums, dependency inventory, licence notices, and build metadata.
 
-# Build a Windows executable
-bundlr build cowsay --target windows-x86_64
+## Build Windows applications on Linux or macOS
+
+Run these commands from a Bundlr source checkout. Bundlr prepares its pinned `uv` executable
+automatically; the generated applications do not require Python, Deno, Bundlr, `uv`, or a virtual
+environment on the Windows machine.
+
+### GUI example: PipUI
+
+```sh
+deno task package \
+  --name PipUI \
+  --command pip-ui \
+  --kind windowed \
+  --python 3.12 \
+  --target windows-x86_64 \
+  --output dist/examples/pipui-0.2.0 \
+  "pip-ui-tkinter==0.2.0"
 ```
 
-The produced executable is self-extracting: it contains a Zig stub, a Python runtime, all required wheels, and bundle metadata. On first run the stub extracts everything to a temporary directory, sets up the environment, and launches the entry point.
+Send these two files to the Windows user:
 
-### Build options
-
-| Flag | Description |
-|---|---|
-| `--target <platform>` | Target platform (`windows-x86_64`, `linux-x86_64`, `macos-aarch64`, …). Default: `linux-x86_64` |
-| `--output <file>` | Explicit output path |
-| `--output-dir <dir>` | Directory for multi-target builds |
-| `--python-version <ver>` | Python version to embed (default: **3.14**) |
-| `--optimise-size` | Minimise binary size |
-| `--optimise-speed` | Maximise runtime speed |
-| `--optimise-compatibility` | Maximise compatibility |
-| `--exclude-dev-deps` | Omit development dependencies |
-| `--entry-point <script>` | Custom entry-point Python code |
-
-## Environment variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `BUNDLR_PYTHON_VERSION` | `3.14` | Python version to use |
-| `BUNDLR_GIT_BRANCH` | `main` | Git branch to check out |
-| `BUNDLR_CACHE_DIR` | platform default | Custom cache directory |
-| `BUNDLR_PROJECT_NAME` | — | Override project name |
-| `BUNDLR_GIT_REPOSITORY` | — | Git repository URL (activates Git mode) |
-| `BUNDLR_GIT_TAG` | — | Git tag to use |
-| `BUNDLR_GIT_COMMIT` | — | Git commit hash to use |
-| `BUNDLR_FORCE_REINSTALL` | `false` | Force reinstallation |
-
-## Build from source
-
-Requires [Zig](https://ziglang.org/).
-
-```bash
-git clone https://github.com/ai-mindset/bundlr.git
-cd bundlr && zig build
-# Executable: zig-out/bin/bundlr
+```text
+dist/examples/pipui-0.2.0/PipUI-windows-x86_64.zip
+dist/examples/pipui-0.2.0/PipUI-windows-x86_64.zip.sha256
 ```
 
-## Architecture
+After verifying the checksum and extracting the entire ZIP, double-click:
 
-| Module | File | Role |
-|---|---|---|
-| Core | `src/main.zig` | CLI entry point, dispatch |
-| Config | `src/config.zig` | Flags, env vars, defaults |
-| Build pipeline | `src/build/pipeline.zig` | Orchestrates dependency resolution, asset collection, runtime embedding |
-| Bundle generator | `src/build/bundle_generator.zig` | Compiles Zig stub, appends bundle archive |
-| Dependency resolver | `src/build/dependency_resolver.zig` | Resolves and downloads wheels |
-| Runtime embedder | `src/build/runtime_embedder.zig` | Embeds Python standalone distribution |
-| Asset collector | `src/build/asset_collector.zig` | Collects wheels and assets |
-| uv manager | `src/uv/bootstrap.zig` | Bootstraps and manages `uv` |
-| Git archive | `src/git/archive.zig` | Downloads/extracts GitHub, Codeberg, GitLab archives (no `git` binary needed) |
-| Python distribution | `src/python/distribution.zig` | Downloads and caches Python standalone builds |
-| GUI | `src/gui/simple_dialogues.zig` | Cross-platform interactive GUI |
-| Platform utilities | `src/platform/` | HTTP, path, process helpers |
+```text
+PipUI-windows-x86_64\PipUI.exe
+```
 
-## License
+### CLI example: Black
 
-MIT
+```sh
+deno task package \
+  --name Black \
+  --command black \
+  --kind console \
+  --python 3.12 \
+  --target windows-x86_64 \
+  --output dist/examples/black-26.5.1 \
+  "black==26.5.1"
+```
+
+Send these two files to the Windows user:
+
+```text
+dist/examples/black-26.5.1/Black-windows-x86_64.zip
+dist/examples/black-26.5.1/Black-windows-x86_64.zip.sha256
+```
+
+After verifying the checksum and extracting the entire ZIP, run:
+
+```powershell
+.\Black-windows-x86_64\Black.exe --help
+.\Black-windows-x86_64\Black.exe --check C:\path\to\python-project
+```
+
+Bundlr refuses to overwrite a completed application. Use a new versioned output directory for a
+new release.
+
+### Verify an archive with SHA-256
+
+Keep the archive and its `.sha256` file in the same directory. Run the appropriate command from
+that directory, and extract the archive only after verification succeeds.
+
+Linux:
+
+```sh
+sha256sum --check PipUI-windows-x86_64.zip.sha256
+```
+
+macOS:
+
+```sh
+shasum -a 256 --check PipUI-windows-x86_64.zip.sha256
+```
+
+Windows PowerShell:
+
+```powershell
+$archive = ".\PipUI-windows-x86_64.zip"
+$expected = ((Get-Content "$archive.sha256" -Raw).Trim() -split "\s+")[0]
+$actual = (Get-FileHash $archive -Algorithm SHA256).Hash
+if ($actual -ine $expected) { throw "SHA-256 verification failed" }
+Write-Host "SHA-256 verification passed"
+```
+
+## Verified Linux-to-Windows applications
+
+PipUI 0.2.0 and Black 26.5.1 were bundled on Linux, copied to a Windows machine without a Bundlr
+development environment, and launched successfully. PipUI opened as a normal desktop application:
+
+![PipUI 0.2.0 running on Windows after being bundled on Linux](assets/pipui.png)
+
+Black ran as a normal Windows command-line executable:
+
+<details>
+<summary>Black 26.5.1 <code>--help</code> output captured on Windows</summary>
+
+```text
+C:\Users\user> .\black-26.5.1\Black-windows-x86_64\Black.exe --help
+Usage: Black.exe [OPTIONS] SRC ...
+
+  The uncompromising code formatter.
+
+Options:
+  -c, --code TEXT                 Format the code passed in as a string.
+  -l, --line-length INTEGER       How many characters per line to allow.
+                                  [default: 88]
+...
+  -h, --help                      Show this message and exit.
+```
+
+</details>
+
+## How cross-target packaging works
+
+Bundlr combines a checksum-pinned target
+[Python runtime](https://github.com/astral-sh/python-build-standalone) with target-compatible wheels
+selected by [uv](https://docs.astral.sh/uv/). It does not use PyInstaller or execute foreign target
+binaries while packaging.
+
+Supported applications are:
+
+- Pure Python; or
+- Dependent on native packages that publish wheels for every selected target.
+
+Bundlr rejects missing target wheels and Git projects that build host-specific native code. This
+prevents a Linux binary from being accidentally delivered in a Windows or macOS application.
+
+## Current status
+
+- One Linux command successfully generated Linux x64, Windows x64, macOS ARM64, and macOS Intel
+  archives.
+- The Linux application launched successfully; its archive and internal file checksums passed before
+  and after launch, while foreign executables were verified structurally.
+- PipUI 0.2.0 and Black 26.5.1 were bundled on Linux and launched successfully on Windows without a
+  separately installed Python runtime or virtual environment.
+- The four client archives measured 23–33 MiB.
+- Formatting, linting, type checking, and the test suite pass.
+- Native macOS launch testing remains required before client release.
+
+Bundlr and generated applications are currently unsigned. Corporate controls, SmartScreen, or
+Gatekeeper may require IT approval; use [IT_SUPPORT_REPORT.md](IT_SUPPORT_REPORT.md).
+
+## Development
+
+Requires Deno 2.9.4 or later.
+
+```sh
+deno task check
+deno task test
+deno task build
+```
+
+`build` creates the host command-line executable under `dist`; `build:cli` is its explicit
+equivalent. The experimental desktop interface remains available through `desktop:dev` and
+`desktop:build`, but desktop installers are not published as release artifacts.
+
+GitHub Actions verifies and builds Bundlr CLI executables for Linux x64, Windows x64, macOS ARM64,
+and macOS Intel. It publishes those executables when a `v*` tag is pushed. Client applications are
+built locally by Bundlr and do not depend on CI.

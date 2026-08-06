@@ -1,0 +1,78 @@
+{
+  "compilerOptions": {
+    "lib": ["deno.desktop"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true
+  },
+  "lock": {
+    "frozen": true
+  },
+  "fmt": {
+    "include": ["deno.json", "scripts/**/*.ts", "src/**/*.ts"],
+    "lineWidth": 100,
+    "semiColons": true,
+    "singleQuote": false
+  },
+  "lint": {
+    "include": ["scripts/**/*.ts", "src/**/*.ts"],
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "desktop": {
+    "app": {
+      "name": "Bundlr",
+      "identifier": "io.github.ai-mindset.bundlr"
+    },
+    "output": {
+      "linux": "dist/Bundlr.AppImage",
+      "macos": "dist/Bundlr.dmg",
+      "windows": "dist/Bundlr.msi"
+    }
+  },
+  "permissions": {
+    "application": {
+      "read": true,
+      "write": true,
+      "run": true,
+      "env": [
+        "BUNDLR_UV_EXECUTABLE",
+        "HOME",
+        "LOCALAPPDATA",
+        "XDG_CACHE_HOME"
+      ],
+      "net": [
+        "github.com",
+        "release-assets.githubusercontent.com"
+      ]
+    },
+    "prepare-uv": {
+      "read": true,
+      "write": true,
+      "run": ["tar"],
+      "net": [
+        "github.com",
+        "release-assets.githubusercontent.com"
+      ]
+    },
+    "tests": {
+      "read": true,
+      "write": true,
+      "run": true
+    }
+  },
+  "tasks": {
+    "build": "deno task build:cli",
+    "build:cli": "deno task prepare:uv && deno compile --permission-set=application --no-prompt --include vendor/uv --output dist/bundlr src/main.ts",
+    "build:cli:windows": "deno task prepare:uv x86_64-pc-windows-msvc && deno compile --target x86_64-pc-windows-msvc --permission-set=application --no-prompt --include vendor/uv/uv.exe --include vendor/uv/uv.exe.sha256 --output dist/bundlr-windows-x86_64.exe src/main.ts",
+    "check": "deno fmt --check && deno lint && deno check src/main.ts src/desktop.ts scripts/prepare_uv.ts scripts/check_artifact_size.ts",
+    "desktop:build": "deno task prepare:uv && deno desktop --permission-set=application --no-prompt --include vendor/uv src/desktop.ts",
+    "desktop:dev": "deno task prepare:uv && deno desktop --hmr --permission-set=application --no-prompt src/desktop.ts",
+    "package": "deno task prepare:uv && deno run --permission-set=application --no-prompt src/main.ts",
+    "package:windows": "deno task package --target windows-x86_64",
+    "package:windows:gui": "deno task package:windows --kind windowed",
+    "prepare:uv": "deno run --permission-set=prepare-uv --no-prompt scripts/prepare_uv.ts",
+    "test": "deno test --permission-set=tests --no-prompt",
+    "start": "deno task package"
+  }
+}
