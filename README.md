@@ -5,8 +5,8 @@ application for Windows, macOS, and Linux. Recipients do not need Python, uv, De
 
 ## Package an application
 
-Open Bundlr, paste a pinned package source, select the targets, and click **Package**. Bundlr
-detects the application name, entry point, and console/GUI type when possible.
+Run Bundlr with a pinned PyPI requirement or HTTPS Git source. Bundlr detects the application
+name, entry point, and console/GUI type when possible.
 
 CLI examples:
 
@@ -157,7 +157,7 @@ Supported applications are:
 Bundlr rejects missing target wheels and Git projects that build host-specific native code. This
 prevents a Linux binary from being accidentally delivered in a Windows or macOS application.
 
-## Prototype status
+## Current status
 
 - One Linux command successfully generated Linux x64, Windows x64, macOS ARM64, and macOS Intel
   archives.
@@ -179,12 +179,13 @@ Requires Deno 2.9.4 or later.
 ```sh
 deno task check
 deno task test
-deno task build:cli
 deno task build
 ```
 
-`build:cli` creates the command-line executable under `dist`. `build` creates the host desktop
-package there as `Bundlr.AppImage`, `Bundlr.msi`, or `Bundlr.dmg`.
+`build` creates the host command-line executable under `dist`; `build:cli` is its explicit
+equivalent. The experimental desktop interface remains available through `desktop:dev` and
+`desktop:build`, but desktop installers are not published as release artifacts.
 
-GitHub Actions is configured to verify and build Bundlr on demand and to publish Bundlr releases
-when a `v*` tag is pushed. Client applications are built locally by Bundlr and do not depend on CI.
+GitHub Actions verifies and builds Bundlr CLI executables for Linux x64, Windows x64, macOS ARM64,
+and macOS Intel. It publishes those executables when a `v*` tag is pushed. Client applications are
+built locally by Bundlr and do not depend on CI.
