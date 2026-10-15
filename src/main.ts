@@ -54,10 +54,9 @@ export async function main(args: readonly string[]): Promise<number> {
     }
 
     const request = parsePackageCliArgs(packageArgs);
-    const encoder = new TextEncoder();
     const results = await packageTargets(request, {
-      stdout: (text) => Deno.stdout.writeSync(encoder.encode(text)),
-      stderr: (text) => Deno.stderr.writeSync(encoder.encode(text)),
+      stdout: (text) => process.stdout.write(text),
+      stderr: (text) => process.stderr.write(text),
     });
     for (const result of results) {
       console.log(`Created ${result.archivePath} for ${result.target} (${result.sha256}).`);
@@ -74,15 +73,17 @@ export async function main(args: readonly string[]): Promise<number> {
 }
 
 function isUsageError(error: unknown): error is Error {
-  return error instanceof PackageCliUsageError ||
+  return (
+    error instanceof PackageCliUsageError ||
     error instanceof InvalidPackageSourceError ||
     error instanceof InvalidPackageRequestError ||
     error instanceof UnsupportedTargetError ||
     error instanceof EntryPointNotFoundError ||
     error instanceof InvalidEntryPointError ||
-    error instanceof PackagingError;
+    error instanceof PackagingError
+  );
 }
 
 if (import.meta.main) {
-  Deno.exitCode = await main(Deno.args);
+  process.exitCode = await main(process.argv.slice(2));
 }

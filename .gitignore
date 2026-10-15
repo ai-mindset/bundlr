@@ -1,3 +1,4 @@
 actionlint
 /dist/
 /vendor/uv/
+/node_modules/

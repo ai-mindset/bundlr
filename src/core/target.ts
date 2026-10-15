@@ -5,15 +5,13 @@ export class UnsupportedTargetError extends Error {
 }
 
 export function currentTarget(
-  os: typeof Deno.build.os = Deno.build.os,
-  arch: typeof Deno.build.arch = Deno.build.arch,
+  os: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
 ): TargetPlatform {
-  if (os === "linux" && arch === "x86_64") return "linux-x86_64";
-  if (os === "darwin" && arch === "aarch64") return "macos-arm64";
-  if (os === "darwin" && arch === "x86_64") return "macos-x86_64";
-  if (os === "windows" && arch === "x86_64") return "windows-x86_64";
+  if (os === "linux" && arch === "x64") return "linux-x86_64";
+  if (os === "darwin" && arch === "arm64") return "macos-arm64";
+  if (os === "darwin" && arch === "x64") return "macos-x86_64";
+  if (os === "win32" && arch === "x64") return "windows-x86_64";
 
-  throw new UnsupportedTargetError(
-    `Bundlr does not support packaging on ${os}-${arch}.`,
-  );
+  throw new UnsupportedTargetError(`Bundlr does not support packaging on ${os}-${arch}.`);
 }

@@ -1,4 +1,5 @@
-import { assertEquals } from "jsr:@std/assert@1.0.19";
+import { test } from "bun:test";
+import { assertEquals } from "../test/assert.ts";
 import type { PackageRequest } from "../domain/package_request.ts";
 import { selectPythonDistribution } from "./python_distribution.ts";
 import { buildGitRootInstallInvocation, buildTargetInstallInvocation } from "./target_install.ts";
@@ -13,7 +14,7 @@ const request: PackageRequest = {
   outputDirectory: "dist",
 };
 
-Deno.test("installs target wheels without source-build fallback", () => {
+test("installs target wheels without source-build fallback", () => {
   const invocation = buildTargetInstallInvocation(
     request,
     selectPythonDistribution("windows-x86_64", "3.12"),
@@ -37,16 +38,12 @@ Deno.test("installs target wheels without source-build fallback", () => {
   ]);
 });
 
-Deno.test("passes an HTTPS Git source without a shell", () => {
+test("passes an HTTPS Git source without a shell", () => {
   const invocation = buildGitRootInstallInvocation(
     { ...request, source: { kind: "git", url: new URL("https://example.com/app.git@abc") } },
     "packages",
   );
 
   assertEquals(invocation.args.at(-1), "git+https://example.com/app.git@abc");
-  assertEquals(invocation.args.slice(-4, -1), [
-    "packages",
-    "--no-deps",
-    "--no-installer-metadata",
-  ]);
+  assertEquals(invocation.args.slice(-4, -1), ["packages", "--no-deps", "--no-installer-metadata"]);
 });

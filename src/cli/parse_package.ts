@@ -72,9 +72,8 @@ export function parsePackageCliArgs(args: readonly string[]): PackageRequest {
   }
 
   const source = parsePackageSource(sourceInput);
-  const inferredName = source.kind === "pypi"
-    ? inferDistributionName(source.requirement)
-    : inferGitName(source.url);
+  const inferredName =
+    source.kind === "pypi" ? inferDistributionName(source.requirement) : inferGitName(source.url);
   if (applicationName === undefined && inferredName === undefined) {
     throw new PackageCliUsageError("Could not infer the application name; use --name <name>.");
   }
@@ -90,11 +89,7 @@ export function parsePackageCliArgs(args: readonly string[]): PackageRequest {
   };
 }
 
-function requiredOptionValue(
-  args: readonly string[],
-  index: number,
-  option: string,
-): string {
+function requiredOptionValue(args: readonly string[], index: number, option: string): string {
   const value = args[index + 1];
   if (value === undefined || value.length === 0 || value.startsWith("-")) {
     throw new PackageCliUsageError(`${option} requires a value.`);
@@ -118,5 +113,10 @@ function inferDistributionName(requirement: string): string | undefined {
 }
 
 function inferGitName(url: URL): string | undefined {
-  return url.pathname.split("/").filter(Boolean).at(-1)?.split("@", 1)[0]?.replace(/\.git$/, "");
+  return url.pathname
+    .split("/")
+    .filter(Boolean)
+    .at(-1)
+    ?.split("@", 1)[0]
+    ?.replace(/\.git$/, "");
 }

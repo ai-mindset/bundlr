@@ -1,12 +1,9 @@
-import { assertEquals, assertThrows } from "jsr:@std/assert@1.0.14";
+import { test } from "bun:test";
+import { assertEquals, assertThrows } from "../test/assert.ts";
 import { PackageCliUsageError, parsePackageCliArgs } from "./parse_package.ts";
 
-Deno.test("infers a PyPI application name and command", () => {
-  const request = parsePackageCliArgs([
-    "--target",
-    "linux-x86_64",
-    "example_app==1.2.3",
-  ]);
+test("infers a PyPI application name and command", () => {
+  const request = parsePackageCliArgs(["--target", "linux-x86_64", "example_app==1.2.3"]);
   assertEquals(request.applicationName, "example_app");
   assertEquals(request.command, "");
   assertEquals(request.applicationKind, "auto");
@@ -15,7 +12,7 @@ Deno.test("infers a PyPI application name and command", () => {
   assertEquals(request.outputDirectory, "dist");
 });
 
-Deno.test("parses explicit packaging options", () => {
+test("parses explicit packaging options", () => {
   const request = parsePackageCliArgs([
     "--name",
     "Example App",
@@ -40,13 +37,13 @@ Deno.test("parses explicit packaging options", () => {
   assertEquals(request.source.kind, "git");
 });
 
-Deno.test("infers a Git application name and auto-detects its command", () => {
+test("infers a Git application name and auto-detects its command", () => {
   const request = parsePackageCliArgs(["https://github.com/example/example-app.git@abc123"]);
   assertEquals(request.applicationName, "example-app");
   assertEquals(request.command, "");
 });
 
-Deno.test("rejects invalid kinds and targets", () => {
+test("rejects invalid kinds and targets", () => {
   assertThrows(
     () => parsePackageCliArgs(["--kind", "service", "example-app"]),
     PackageCliUsageError,
@@ -59,17 +56,12 @@ Deno.test("rejects invalid kinds and targets", () => {
   );
 });
 
-Deno.test("expands the all-target shortcut", () => {
+test("expands the all-target shortcut", () => {
   const request = parsePackageCliArgs(["--target", "all", "example-app==1.0.0"]);
-  assertEquals(request.targets, [
-    "linux-x86_64",
-    "macos-arm64",
-    "macos-x86_64",
-    "windows-x86_64",
-  ]);
+  assertEquals(request.targets, ["linux-x86_64", "macos-arm64", "macos-x86_64", "windows-x86_64"]);
 });
 
-Deno.test("rejects unknown options and trailing arguments", () => {
+test("rejects unknown options and trailing arguments", () => {
   assertThrows(
     () => parsePackageCliArgs(["--unknown", "value", "example-app"]),
     PackageCliUsageError,

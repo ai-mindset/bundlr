@@ -1,4 +1,6 @@
-import { basename, join } from "jsr:@std/path@1.1.2";
+import { mkdir, rename, rm, lstat } from "node:fs/promises";
+import { makeTempDir, isNotFound, writeTextFile } from "../platform/fs.ts";
+import { basename, join } from "node:path";
 import { type PackageRequest, validatePackageRequest } from "../domain/package_request.ts";
 import { resolveUvExecutable } from "../platform/uv.ts";
 import { applicationPaths, createApplicationLauncher } from "./application_layout.ts";
@@ -38,15 +40,15 @@ export async function packageApplication(
   const distribution = selectPythonDistribution(target, request.python);
   const artifactPath = expectedArtifactPath(request);
   await requireAbsent(artifactPath);
-  await Deno.mkdir(request.outputDirectory, { recursive: true });
+  await mkdir(request.outputDirectory, { recursive: true });
 
-  const temporaryDirectory = await Deno.makeTempDir({
+  const temporaryDirectory = await makeTempDir({
     dir: request.outputDirectory,
     prefix: ".bundlr-build-",
   });
   try {
     const paths = applicationPaths(request, temporaryDirectory);
-    await Deno.mkdir(paths.packages, { recursive: true });
+    await mkdir(paths.packages, { recursive: true });
 
     events.stderr?.(`Downloading Python ${distribution.pythonVersion} for ${target}...\n`);
     await materializePythonRuntime(distribution, paths.runtime, signal);
@@ -61,11 +63,10 @@ export async function packageApplication(
         signal,
       );
     } else {
-      const root = await runInvocation(
-        uv,
-        buildGitRootInstallInvocation(request, paths.packages),
-        { events, signal },
-      );
+      const root = await runInvocation(uv, buildGitRootInstallInvocation(request, paths.packages), {
+        events,
+        signal,
+      });
       if (!root.success) {
         throw new PackagingError(`Git project wheel build failed with exit code ${root.code}.`);
       }
@@ -84,9 +85,10 @@ export async function packageApplication(
         );
       }
     }
-    const effectiveRequest = request.applicationKind === "auto"
-      ? { ...request, applicationKind: entryPoint.applicationKind }
-      : request;
+    const effectiveRequest =
+      request.applicationKind === "auto"
+        ? { ...request, applicationKind: entryPoint.applicationKind }
+        : request;
     await createApplicationLauncher(effectiveRequest, paths, distribution, entryPoint.value);
     await writeManifest(
       effectiveRequest,
@@ -97,7 +99,7 @@ export async function packageApplication(
     await writeSupplyChainFiles(paths.root, paths.packages);
 
     const stagedArtifact = join(temporaryDirectory, basename(artifactPath));
-    await Deno.rename(stagedArtifact, artifactPath);
+    await rename(stagedArtifact, artifactPath);
     return { artifactPath, target };
   } catch (error) {
     if (error instanceof PythonRuntimeError) {
@@ -105,7 +107,7 @@ export async function packageApplication(
     }
     throw error;
   } finally {
-    await Deno.remove(temporaryDirectory, { recursive: true });
+    await rm(temporaryDirectory, { recursive: true });
   }
 }
 
@@ -126,22 +128,17 @@ async function requireSuccessfulInstall(
 
 function expectedArtifactPath(request: PackageRequest): string {
   const suffix = request.targets[0]?.startsWith("macos-") === true ? ".app" : "";
-  return join(
-    request.outputDirectory,
-    `${request.applicationName}-${request.targets[0]}${suffix}`,
-  );
+  return join(request.outputDirectory, `${request.applicationName}-${request.targets[0]}${suffix}`);
 }
 
 async function requireAbsent(path: string): Promise<void> {
   try {
-    await Deno.lstat(path);
+    await lstat(path);
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return;
+    if (isNotFound(error)) return;
     throw error;
   }
-  throw new PackagingError(
-    `Refusing to overwrite the existing artifact: ${path}`,
-  );
+  throw new PackagingError(`Refusing to overwrite the existing artifact: ${path}`);
 }
 
 async function writeManifest(
@@ -150,10 +147,9 @@ async function writeManifest(
   pythonVersion: string,
   command: string,
 ): Promise<void> {
-  const source = request.source.kind === "git"
-    ? request.source.url.href
-    : request.source.requirement;
-  await Deno.writeTextFile(
+  const source =
+    request.source.kind === "git" ? request.source.url.href : request.source.requirement;
+  await writeTextFile(
     join(root, "bundlr-manifest.json"),
     JSON.stringify(
       {

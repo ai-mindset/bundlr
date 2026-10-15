@@ -1,4 +1,5 @@
-const [path, maximumInput] = Deno.args;
+import { lstat, opendir } from "node:fs/promises";
+const [path, maximumInput] = process.argv.slice(2);
 if (path === undefined || maximumInput === undefined) {
   throw new Error("Usage: check_artifact_size.ts <artifact> <maximum-bytes>");
 }
@@ -17,11 +18,11 @@ if (size > maximum) {
 }
 
 async function measurePath(path: string): Promise<number> {
-  const stat = await Deno.lstat(path);
-  if (!stat.isDirectory) return stat.size;
+  const stat = await lstat(path);
+  if (!stat.isDirectory()) return stat.size;
 
   let total = 0;
-  for await (const entry of Deno.readDir(path)) {
+  for await (const entry of await opendir(path)) {
     total += await measurePath(`${path}/${entry.name}`);
   }
   return total;

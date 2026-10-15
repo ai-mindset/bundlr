@@ -1,7 +1,12 @@
-import { Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "jsr:@zip-js/zip-js@2.8.34";
+import { readFile, writeFile, mkdir, copyFile, chmod, rm, opendir } from "node:fs/promises";
+import { makeTempDir, writeTextFile } from "../src/platform/fs.ts";
+import JSZip from "jszip";
+import { runCommandOutput } from "../src/platform/command.ts";
 import { UV_CHECKSUM_MANIFEST_SHA256, UV_VERSION } from "../src/uv_version.ts";
 
 const RELEASE_BASE = `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}`;
+
+class MissingFileError extends Error {}
 
 const artifacts: Readonly<Record<string, string>> = {
   "aarch64-apple-darwin": "uv-aarch64-apple-darwin.tar.gz",
@@ -11,14 +16,14 @@ const artifacts: Readonly<Record<string, string>> = {
   "x86_64-unknown-linux-gnu": "uv-x86_64-unknown-linux-gnu.tar.gz",
 };
 
-if (import.meta.main) await main(Deno.args);
+if (import.meta.main) await main(process.argv.slice(2));
 
 async function main(args: readonly string[]): Promise<void> {
   const target = args[0] ?? hostTarget();
   const artifact = artifacts[target];
   if (artifact === undefined) throw new Error(`Unsupported uv target: ${target}`);
 
-  const temporaryDirectory = await Deno.makeTempDir({ prefix: "bundlr-uv-" });
+  const temporaryDirectory = await makeTempDir({ prefix: "bundlr-uv-" });
   try {
     const checksums = await download(`${RELEASE_BASE}/sha256.sum`);
     await verify(checksums, UV_CHECKSUM_MANIFEST_SHA256, "uv checksum manifest");
@@ -27,7 +32,7 @@ async function main(args: readonly string[]): Promise<void> {
     const archive = await download(`${RELEASE_BASE}/${artifact}`);
     await verify(archive, expectedArtifactChecksum, artifact);
     const archivePath = `${temporaryDirectory}/${artifact}`;
-    await Deno.writeFile(archivePath, archive);
+    await writeFile(archivePath, archive);
     const executableName = target.includes("windows") ? "uv.exe" : "uv";
     if (artifact.endsWith(".zip")) {
       await extractZipExecutable(archive, temporaryDirectory, executableName);
@@ -37,15 +42,15 @@ async function main(args: readonly string[]): Promise<void> {
     const extractedExecutable = await findFile(temporaryDirectory, executableName);
     const outputDirectory = "vendor/uv";
     const outputExecutable = `${outputDirectory}/${executableName}`;
-    await Deno.mkdir(outputDirectory, { recursive: true });
-    await Deno.copyFile(extractedExecutable, outputExecutable);
-    if (!target.includes("windows")) await Deno.chmod(outputExecutable, 0o755);
+    await mkdir(outputDirectory, { recursive: true });
+    await copyFile(extractedExecutable, outputExecutable);
+    if (!target.includes("windows")) await chmod(outputExecutable, 0o755);
 
-    const executable = await Deno.readFile(outputExecutable);
-    await Deno.writeTextFile(`${outputExecutable}.sha256`, `${await sha256(executable)}\n`);
+    const executable = await readFile(outputExecutable);
+    await writeTextFile(`${outputExecutable}.sha256`, `${await sha256(executable)}\n`);
     console.log(`Prepared uv ${UV_VERSION} for ${target} at ${outputExecutable}`);
   } finally {
-    await Deno.remove(temporaryDirectory, { recursive: true });
+    await rm(temporaryDirectory, { recursive: true });
   }
 }
 
@@ -83,60 +88,47 @@ async function extractZipExecutable(
   destination: string,
   name: string,
 ): Promise<void> {
-  const reader = new ZipReader(new Uint8ArrayReader(archive));
-  try {
-    for (const entry of await reader.getEntries()) {
-      if (entry.directory || entry.filename.split("/").at(-1) !== name) continue;
-      await Deno.writeFile(
-        `${destination}/${name}`,
-        await entry.getData(new Uint8ArrayWriter()),
-        { createNew: true },
-      );
-      return;
-    }
-    throw new Deno.errors.NotFound(`${name} was not present in the uv archive.`);
-  } finally {
-    await reader.close();
-  }
+  const zip = await JSZip.loadAsync(archive);
+  const entry = Object.values(zip.files).find(
+    (candidate) => !candidate.dir && candidate.name.split("/").at(-1) === name,
+  );
+  if (entry === undefined) throw new MissingFileError(`${name} was not present in the uv archive.`);
+  await writeFile(`${destination}/${name}`, await entry.async("uint8array"), { flag: "wx" });
 }
 
 async function extract(archive: string, destination: string): Promise<void> {
-  const result = await new Deno.Command("tar", {
-    args: ["-xf", archive, "-C", destination],
-    stdout: "null",
-    stderr: "piped",
-  }).output();
+  const result = await runCommandOutput("tar", ["-xf", archive, "-C", destination]);
   if (!result.success) {
-    throw new Error(`Could not extract uv: ${new TextDecoder().decode(result.stderr).trim()}`);
+    throw new Error(`Could not extract uv: ${result.stderr.trim()}`);
   }
 }
 
 async function findFile(directory: string, name: string): Promise<string> {
-  for await (const entry of Deno.readDir(directory)) {
+  for await (const entry of await opendir(directory)) {
     const path = `${directory}/${entry.name}`;
-    if (entry.isFile && entry.name === name) return path;
-    if (entry.isDirectory) {
+    if (entry.isFile() && entry.name === name) return path;
+    if (entry.isDirectory()) {
       try {
         return await findFile(path, name);
       } catch (error) {
-        if (!(error instanceof Deno.errors.NotFound)) throw error;
+        if (!(error instanceof MissingFileError)) throw error;
       }
     }
   }
-  throw new Deno.errors.NotFound(`${name} was not present in the uv archive.`);
+  throw new MissingFileError(`${name} was not present in the uv archive.`);
 }
 
 function hostTarget(): string {
-  const architecture = Deno.build.arch === "aarch64" ? "aarch64" : "x86_64";
-  switch (Deno.build.os) {
+  const architecture = process.arch === "arm64" ? "aarch64" : "x86_64";
+  switch (process.platform) {
     case "darwin":
       return `${architecture}-apple-darwin`;
-    case "windows":
+    case "win32":
       if (architecture !== "x86_64") throw new Error("Windows ARM64 is not currently supported.");
       return "x86_64-pc-windows-msvc";
     case "linux":
       return `${architecture}-unknown-linux-gnu`;
     default:
-      throw new Error(`Unsupported host OS: ${Deno.build.os}`);
+      throw new Error(`Unsupported host OS: ${process.platform}`);
   }
 }

@@ -1,4 +1,6 @@
-import { join } from "jsr:@std/path@1.1.2";
+import { opendir } from "node:fs/promises";
+import { isNotFound, readTextFile } from "../platform/fs.ts";
+import { join } from "node:path";
 import type { ApplicationKind } from "../domain/package_request.ts";
 import { parsePythonEntryPoint, type PythonEntryPoint } from "./entry_point.ts";
 
@@ -24,15 +26,15 @@ export async function findInstalledEntryPoint(
   command: string,
 ): Promise<InstalledEntryPoint> {
   const matches: Array<ApplicationEntry & { metadataDirectory: string }> = [];
-  for await (const entry of Deno.readDir(packagesDirectory)) {
-    if (!entry.isDirectory || !entry.name.endsWith(".dist-info")) continue;
+  for await (const entry of await opendir(packagesDirectory)) {
+    if (!entry.isDirectory() || !entry.name.endsWith(".dist-info")) continue;
     const metadataDirectory = join(packagesDirectory, entry.name);
     const metadataPath = join(metadataDirectory, "entry_points.txt");
     let metadata: string;
     try {
-      metadata = await Deno.readTextFile(metadataPath);
+      metadata = await readTextFile(metadataPath);
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) continue;
+      if (isNotFound(error)) continue;
       throw error;
     }
     matches.push(
@@ -47,13 +49,13 @@ export async function findInstalledEntryPoint(
     throw new EntryPointNotFoundError(
       matches.length > 1
         ? command.length === 0
-          ? `More than one application entry point was found: ${
-            matches.map((match) => match.name).join(", ")
-          }. Select one with --command.`
+          ? `More than one application entry point was found: ${matches
+              .map((match) => match.name)
+              .join(", ")}. Select one with --command.`
           : `More than one "${command}" application entry point was found.`
         : command.length === 0
-        ? "The package does not provide an application entry point."
-        : `The package does not provide a "${command}" application entry point.`,
+          ? "The package does not provide an application entry point."
+          : `The package does not provide a "${command}" application entry point.`,
     );
   }
   return {

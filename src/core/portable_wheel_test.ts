@@ -1,11 +1,14 @@
-import { assertRejects } from "jsr:@std/assert@1.0.19";
+import { test } from "bun:test";
+import { rm } from "node:fs/promises";
+import { makeTempDir, writeTextFile } from "../platform/fs.ts";
+import { assertRejects } from "../test/assert.ts";
 import { NonPortableGitPackageError, requirePortableGitWheel } from "./portable_wheel.ts";
 
-Deno.test("accepts a pure platform-independent Git wheel", async () => {
+test("accepts a pure platform-independent Git wheel", async () => {
   await withWheel("Root-Is-Purelib: true\nTag: py3-none-any\n", requirePortableGitWheel);
 });
 
-Deno.test("rejects a host-native Git wheel", async () => {
+test("rejects a host-native Git wheel", async () => {
   await assertRejects(
     () =>
       withWheel(
@@ -21,11 +24,11 @@ async function withWheel(
   contents: string,
   operation: (directory: string) => Promise<void>,
 ): Promise<void> {
-  const directory = await Deno.makeTempDir({ prefix: "bundlr-wheel-test-" });
+  const directory = await makeTempDir({ prefix: "bundlr-wheel-test-" });
   try {
-    await Deno.writeTextFile(`${directory}/WHEEL`, contents);
+    await writeTextFile(`${directory}/WHEEL`, contents);
     await operation(directory);
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
 }

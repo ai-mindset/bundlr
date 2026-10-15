@@ -1,7 +1,8 @@
-import { join } from "jsr:@std/path@1.1.2";
+import { readTextFile } from "../platform/fs.ts";
+import { join } from "node:path";
 
 export async function readWheelRequirements(metadataDirectory: string): Promise<string[]> {
-  return parseWheelRequirements(await Deno.readTextFile(join(metadataDirectory, "METADATA")));
+  return parseWheelRequirements(await readTextFile(join(metadataDirectory, "METADATA")));
 }
 
 export function parseWheelRequirements(metadata: string): string[] {

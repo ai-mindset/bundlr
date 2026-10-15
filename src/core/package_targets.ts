@@ -1,3 +1,5 @@
+import { rm } from "node:fs/promises";
+import { isNotFound } from "../platform/fs.ts";
 import type { PackageRequest } from "../domain/package_request.ts";
 import { type ClientArchive, createClientArchive } from "./client_archive.ts";
 import { packageApplication, type PackageResult } from "./package_application.ts";
@@ -19,12 +21,13 @@ export async function packageTargets(
       results.push({ ...result, ...archive });
     } catch (archiveError) {
       try {
-        await Deno.remove(result.artifactPath, { recursive: true });
+        await rm(result.artifactPath, { recursive: true });
       } catch (cleanupError) {
-        if (!(cleanupError instanceof Deno.errors.NotFound)) {
+        if (!isNotFound(cleanupError)) {
           throw new AggregateError(
             [archiveError, cleanupError],
             `Archive creation failed and Bundlr could not remove ${result.artifactPath}.`,
+            { cause: cleanupError },
           );
         }
       }

@@ -1,0 +1,31 @@
+{
+  "name": "bundlr",
+  "version": "0.2.0-dev",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.3",
+  "scripts": {
+    "build": "bun run build:cli",
+    "build:cli": "bun run prepare:uv && bun build --compile --asset vendor/uv src/main.ts --outfile dist/bundlr",
+    "build:cli:windows": "bun run prepare:uv x86_64-pc-windows-msvc && bun build --compile --target=bun-windows-x64 --asset vendor/uv src/main.ts --outfile dist/bundlr-windows-x86_64.exe",
+    "typecheck": "bun check",
+    "desktop:build": "bun run prepare:uv && bun build --compile --asset vendor/uv src/desktop.ts --outfile dist/bundlr-desktop",
+    "desktop:dev": "bun run prepare:uv && bun src/desktop.ts",
+    "package": "bun run prepare:uv && bun src/main.ts",
+    "package:windows": "bun run package --target windows-x86_64",
+    "package:windows:gui": "bun run package:windows --kind windowed",
+    "prepare:uv": "bun scripts/prepare_uv.ts",
+    "lint:format": "biome ci --assist-enabled=false src scripts package.json tsconfig.json biome.json",
+    "format": "biome format --write src scripts package.json tsconfig.json biome.json",
+    "test": "bun test",
+    "start": "bun run package"
+  },
+  "dependencies": {
+    "jszip": "file:vendor/jszip"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "bun-types": "1.4.2",
+    "@types/node": "26.4.1"
+  }
+}

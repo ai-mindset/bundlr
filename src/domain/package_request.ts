@@ -1,10 +1,6 @@
 import type { PackageSource } from "./source.ts";
 
-export type TargetPlatform =
-  | "linux-x86_64"
-  | "macos-arm64"
-  | "macos-x86_64"
-  | "windows-x86_64";
+export type TargetPlatform = "linux-x86_64" | "macos-arm64" | "macos-x86_64" | "windows-x86_64";
 
 export type ApplicationKind = "auto" | "console" | "windowed";
 
@@ -51,9 +47,7 @@ function requireValue(value: string, label: string): void {
     throw new InvalidPackageRequestError(`${label} is required.`);
   }
   if (value !== value.trim()) {
-    throw new InvalidPackageRequestError(
-      `${label} cannot begin or end with whitespace.`,
-    );
+    throw new InvalidPackageRequestError(`${label} cannot begin or end with whitespace.`);
   }
   if (value.includes("\0")) {
     throw new InvalidPackageRequestError(`${label} contains an invalid character.`);

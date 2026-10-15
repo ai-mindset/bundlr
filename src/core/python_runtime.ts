@@ -1,4 +1,7 @@
-import { join } from "jsr:@std/path@1.1.2";
+import { writeFile, mkdir, rm, stat } from "node:fs/promises";
+import { makeTempDir, isNotFound } from "../platform/fs.ts";
+import { join } from "node:path";
+import { runCommandOutput } from "../platform/command.ts";
 import type { PythonDistribution } from "./python_distribution.ts";
 
 export class PythonRuntimeError extends Error {
@@ -13,15 +16,15 @@ export async function materializePythonRuntime(
   const archive = await download(distribution.archiveUrl, signal);
   await verifySha256(archive, distribution.sha256);
 
-  const temporaryDirectory = await Deno.makeTempDir({ prefix: "bundlr-python-" });
+  const temporaryDirectory = await makeTempDir({ prefix: "bundlr-python-" });
   try {
     const archivePath = join(temporaryDirectory, "python.tar.gz");
-    await Deno.writeFile(archivePath, archive, { createNew: true });
-    await Deno.mkdir(destination, { recursive: true });
+    await writeFile(archivePath, archive, { flag: "wx" });
+    await mkdir(destination, { recursive: true });
     await extractArchive(archivePath, destination, signal);
     await requireFile(join(destination, distribution.executablePath));
   } finally {
-    await Deno.remove(temporaryDirectory, { recursive: true });
+    await rm(temporaryDirectory, { recursive: true });
   }
 }
 
@@ -48,26 +51,22 @@ async function extractArchive(
   destination: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  const output = await new Deno.Command("tar", {
-    args: ["-xzf", archive, "-C", destination, "--strip-components=1"],
-    stdin: "null",
-    stdout: "null",
-    stderr: "piped",
+  const output = await runCommandOutput(
+    "tar",
+    ["-xzf", archive, "-C", destination, "--strip-components=1"],
     signal,
-  }).output();
+  );
   if (!output.success) {
-    throw new PythonRuntimeError(
-      `Could not extract the Python runtime: ${new TextDecoder().decode(output.stderr).trim()}`,
-    );
+    throw new PythonRuntimeError(`Could not extract the Python runtime: ${output.stderr.trim()}`);
   }
 }
 
 async function requireFile(path: string): Promise<void> {
   try {
-    const stat = await Deno.stat(path);
-    if (stat.isFile) return;
+    const fileStats = await stat(path);
+    if (fileStats.isFile()) return;
   } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    if (!isNotFound(error)) throw error;
   }
   throw new PythonRuntimeError(`Python runtime is missing its executable: ${path}`);
 }

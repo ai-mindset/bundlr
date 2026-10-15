@@ -1,23 +1,22 @@
-import { assertEquals } from "jsr:@std/assert@1.0.14";
+import { test } from "bun:test";
+
+import { assertEquals } from "../test/assert.ts";
 import { runInvocation } from "./process.ts";
 
-Deno.test("captures and streams stdout while streaming stderr", async () => {
+test("captures and streams stdout while streaming stderr", async () => {
   let streamedStdout = "";
   let streamedStderr = "";
   const result = await runInvocation(
-    Deno.execPath(),
+    process.execPath,
     {
-      args: [
-        "eval",
-        'console.log(Deno.env.get("BUNDLR_PROCESS_TEST")); console.error("problem")',
-      ],
+      args: ["-e", 'console.log(process.env["BUNDLR_PROCESS_TEST"]); console.error("problem")'],
       env: { BUNDLR_PROCESS_TEST: "ready" },
     },
     {
       captureStdout: true,
       events: {
-        stdout: (text) => streamedStdout += text,
-        stderr: (text) => streamedStderr += text,
+        stdout: (text) => (streamedStdout += text),
+        stderr: (text) => (streamedStderr += text),
       },
     },
   );
@@ -27,9 +26,9 @@ Deno.test("captures and streams stdout while streaming stderr", async () => {
   assertEquals(streamedStderr, "problem\n");
 });
 
-Deno.test("returns a non-zero child exit code", async () => {
-  const result = await runInvocation(Deno.execPath(), {
-    args: ["eval", "Deno.exit(7)"],
+test("returns a non-zero child exit code", async () => {
+  const result = await runInvocation(process.execPath, {
+    args: ["-e", "process.exit(7)"],
     env: {},
   });
 

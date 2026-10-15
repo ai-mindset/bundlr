@@ -7,55 +7,153 @@ import { BUNDLR_VERSION } from "./version.ts";
 
 const headers = {
   "content-type": "text/html; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
   "content-security-policy":
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'",
 };
 
-if (Deno.args.length > 0) {
-  Deno.exit(await main(Deno.args));
-} else {
-  startDesktop();
+if (import.meta.main) {
+  if (process.argv.length > 2) {
+    process.exitCode = await main(process.argv.slice(2));
+  } else {
+    startDesktop();
+  }
 }
 
 function startDesktop(): void {
   const target = currentTarget();
-  Deno.serve(() => new Response(page(target), { headers }));
-  const window = new Deno.BrowserWindow({
-    title: "Bundlr",
-    width: 760,
-    height: 720,
-  });
+  const token = crypto.randomUUID();
   let activeBuild: AbortController | undefined;
-
-  window.bind("packageApplication", async (input: unknown) => {
-    if (activeBuild !== undefined) throw new Error("A package build is already running.");
-    const request = decodeRequest(input);
-    const controller = new AbortController();
-    activeBuild = controller;
-    try {
-      return await packageTargets(request, {
-        stdout: (text) => sendOutput(window, "stdout", text),
-        stderr: (text) => sendOutput(window, "stderr", text),
-      }, controller.signal);
-    } finally {
-      activeBuild = undefined;
+  const sessions = new Map<string, number>();
+  const openedAt = Date.now();
+  const sessionLeaseMs = 10 * 60 * 1000;
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request, server) {
+      const url = new URL(request.url);
+      if (url.origin !== server.url.origin) return new Response("Forbidden", { status: 403 });
+      if (url.pathname === "/" && request.method === "GET") {
+        if (closeTimer !== undefined) clearTimeout(closeTimer);
+        const pageId = crypto.randomUUID();
+        sessions.set(pageId, Date.now());
+        return new Response(page(target, token, pageId), { headers });
+      }
+      if (
+        request.method !== "POST" ||
+        request.headers.get("x-bundlr-token") !== token ||
+        (request.headers.has("origin") && request.headers.get("origin") !== server.url.origin)
+      ) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      if (url.pathname === "/cancel") {
+        activeBuild?.abort("Cancelled by the user.");
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname === "/close") {
+        sessions.delete(request.headers.get("x-bundlr-page") ?? "");
+        if (sessions.size === 0) {
+          if (closeTimer !== undefined) clearTimeout(closeTimer);
+          // A reload requests the page again and cancels this short grace period.
+          closeTimer = setTimeout(stopDesktop, 2000);
+        }
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname === "/heartbeat") {
+        const pageId = request.headers.get("x-bundlr-page");
+        if (pageId !== null && sessions.has(pageId)) sessions.set(pageId, Date.now());
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname === "/quit") {
+        setTimeout(stopDesktop, 0);
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname !== "/package") return new Response("Not found", { status: 404 });
+      if (activeBuild !== undefined)
+        return new Response("A package build is already running.", { status: 409 });
+      let packageRequest: PackageRequest;
+      try {
+        packageRequest = decodeRequest(await request.json());
+      } catch (error) {
+        return new Response(error instanceof Error ? error.message : String(error), {
+          status: 400,
+        });
+      }
+      const controller = new AbortController();
+      activeBuild = controller;
+      server.timeout(request, 0);
+      let connected = true;
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(output) {
+          const send = (value: unknown) => {
+            if (connected) output.enqueue(encoder.encode(JSON.stringify(value) + "\n"));
+          };
+          try {
+            const results = await packageTargets(
+              packageRequest,
+              {
+                stdout: (text) => send({ type: "output", stream: "stdout", text }),
+                stderr: (text) => send({ type: "output", stream: "stderr", text }),
+              },
+              controller.signal,
+            );
+            send({ type: "done", results });
+          } catch (error) {
+            send({
+              type: "error",
+              message: error instanceof Error ? error.message : String(error),
+            });
+          } finally {
+            activeBuild = undefined;
+            if (connected) output.close();
+          }
+        },
+        cancel() {
+          connected = false;
+          controller.abort("Browser disconnected.");
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "content-type": "application/x-ndjson; charset=utf-8",
+          "cache-control": "no-store",
+        },
+      });
+    },
+  });
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [pageId, lastSeen] of sessions) {
+      if (now - lastSeen > sessionLeaseMs) sessions.delete(pageId);
     }
-  });
-
-  window.bind("cancelPackaging", async () => {
-    activeBuild?.abort("Cancelled by the user.");
-    await Promise.resolve();
-  });
-}
-
-function sendOutput(
-  window: Deno.BrowserWindow,
-  stream: "stdout" | "stderr",
-  text: string,
-): void {
-  void window
-    .executeJs(`globalThis.receiveOutput(${JSON.stringify(stream)}, ${JSON.stringify(text)})`)
-    .catch(() => undefined);
+    if (sessions.size === 0 && now - openedAt > sessionLeaseMs) stopDesktop();
+  }, 60_000);
+  function stopDesktop(): void {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(cleanupTimer);
+    if (closeTimer !== undefined) clearTimeout(closeTimer);
+    activeBuild?.abort("Desktop interface closed.");
+    void server.stop();
+  }
+  const url = server.url.href;
+  console.log(`Bundlr desktop interface: ${url}`);
+  const command =
+    process.platform === "darwin"
+      ? ["open", url]
+      : process.platform === "win32"
+        ? ["explorer.exe", url]
+        : ["xdg-open", url];
+  try {
+    Bun.spawn(command, { stdin: "ignore", stdout: "ignore", stderr: "ignore", windowsHide: true });
+  } catch {
+    // The printed URL remains usable when no desktop opener is available.
+  }
 }
 
 function decodeRequest(input: unknown): PackageRequest {
@@ -70,13 +168,12 @@ function decodeRequest(input: unknown): PackageRequest {
     }
   }
   const applicationKind = decodeApplicationKind(value.applicationKind);
-  const python = typeof value.python === "string" && value.python.length > 0
-    ? value.python
-    : "3.12";
-  const outputDirectory = typeof value.outputDirectory === "string" &&
-      value.outputDirectory.length > 0
-    ? value.outputDirectory
-    : "dist";
+  const python =
+    typeof value.python === "string" && value.python.length > 0 ? value.python : "3.12";
+  const outputDirectory =
+    typeof value.outputDirectory === "string" && value.outputDirectory.length > 0
+      ? value.outputDirectory
+      : "dist";
   const source = parsePackageSource(value.source as string);
   const applicationName =
     typeof value.applicationName === "string" && value.applicationName.length > 0
@@ -94,12 +191,15 @@ function decodeRequest(input: unknown): PackageRequest {
 }
 
 function inferApplicationName(source: ReturnType<typeof parsePackageSource>): string {
-  const name = source.kind === "pypi"
-    ? /^([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(source.requirement)?.[1]
-    : source.url.pathname.split("/").filter(Boolean).at(-1)?.split("@", 1)[0]?.replace(
-      /\.git$/,
-      "",
-    );
+  const name =
+    source.kind === "pypi"
+      ? /^([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(source.requirement)?.[1]
+      : source.url.pathname
+          .split("/")
+          .filter(Boolean)
+          .at(-1)
+          ?.split("@", 1)[0]
+          ?.replace(/\.git$/, "");
   if (name === undefined) throw new Error("Enter an application name.");
   return name;
 }
@@ -122,7 +222,7 @@ function decodeApplicationKind(value: unknown): ApplicationKind {
   throw new Error("Application kind must be auto, console, or windowed.");
 }
 
-function page(target: string): string {
+export function page(target: string, token: string, pageId: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -154,6 +254,7 @@ function page(target: string): string {
     button { padding: 9px 18px; border: 0; border-radius: 6px; cursor: pointer; }
     #package { background: #2563eb; color: white; }
     #cancel { background: #dc2626; color: white; }
+    #quit { margin-left: auto; }
     button:disabled { opacity: .5; cursor: default; }
     #status { min-height: 22px; color: GrayText; }
     pre {
@@ -208,15 +309,19 @@ function page(target: string): string {
       <div class="actions">
         <button id="package" type="submit">Package</button>
         <button id="cancel" type="button" disabled>Cancel</button>
+        <button id="quit" type="button">Quit Bundlr</button>
       </div>
     </form>
     <div id="status" role="status"></div>
     <pre id="output" aria-label="Packaging output"></pre>
   </main>
   <script>
+    const token = ${JSON.stringify(token)};
+    const pageId = ${JSON.stringify(pageId)};
     const form = document.querySelector("#form");
     const packageButton = document.querySelector("#package");
     const cancel = document.querySelector("#cancel");
+    const quit = document.querySelector("#quit");
     const status = document.querySelector("#status");
     const output = document.querySelector("#output");
 
@@ -235,7 +340,10 @@ function page(target: string): string {
       packageButton.disabled = true;
       cancel.disabled = false;
       try {
-        const results = await bindings.packageApplication({
+        const response = await fetch("/package", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-bundlr-token": token },
+          body: JSON.stringify({
           source: document.querySelector("#source").value,
           applicationName: document.querySelector("#applicationName").value,
           command: document.querySelector("#command").value,
@@ -244,8 +352,31 @@ function page(target: string): string {
           outputDirectory: document.querySelector("#outputDirectory").value,
           targets: [...document.querySelectorAll('input[name="target"]:checked')]
             .map((input) => input.value),
+          }),
         });
-        status.textContent = "Created " + results.map((result) => result.archivePath).join(", ") + ".";
+        if (!response.ok || !response.body) throw new Error(await response.text());
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = "";
+        let completed = false;
+        while (true) {
+          const { done, value } = await reader.read();
+          pending += decoder.decode(value, { stream: !done });
+          const lines = pending.split("\\n");
+          pending = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line) continue;
+            const event = JSON.parse(line);
+            if (event.type === "output") receiveOutput(event.stream, event.text);
+            if (event.type === "error") throw new Error(event.message);
+            if (event.type === "done") {
+              completed = true;
+              status.textContent = "Created " + event.results.map((result) => result.archivePath).join(", ") + ".";
+            }
+          }
+          if (done) break;
+        }
+        if (!completed) throw new Error("Packaging connection closed unexpectedly.");
       } catch (error) {
         status.textContent = "Error: " + (error.message ?? String(error));
       } finally {
@@ -256,7 +387,29 @@ function page(target: string): string {
 
     cancel.addEventListener("click", async () => {
       status.textContent = "Cancelling…";
-      await bindings.cancelPackaging();
+      await fetch("/cancel", { method: "POST", headers: { "x-bundlr-token": token } });
+    });
+
+    quit.addEventListener("click", async () => {
+      await fetch("/quit", { method: "POST", headers: { "x-bundlr-token": token } });
+      clearInterval(heartbeat);
+      form.querySelectorAll("button, input, select").forEach((control) => control.disabled = true);
+      status.textContent = "Bundlr has stopped. You can close this tab.";
+    });
+
+    const heartbeat = setInterval(() => {
+      void fetch("/heartbeat", {
+        method: "POST",
+        headers: { "x-bundlr-token": token, "x-bundlr-page": pageId },
+      }).catch(() => {});
+    }, 30_000);
+
+    addEventListener("pagehide", () => {
+      void fetch("/close", {
+        method: "POST",
+        headers: { "x-bundlr-token": token, "x-bundlr-page": pageId },
+        keepalive: true,
+      });
     });
   </script>
 </body>

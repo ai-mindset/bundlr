@@ -1,7 +1,8 @@
-import { assertEquals } from "jsr:@std/assert@1.0.19";
+import { test } from "bun:test";
+import { assertEquals } from "../test/assert.ts";
 import { parseWheelRequirements } from "./wheel_metadata.ts";
 
-Deno.test("reads repeated and folded wheel requirements", () => {
+test("reads repeated and folded wheel requirements", () => {
   assertEquals(
     parseWheelRequirements(
       "Metadata-Version: 2.4\n" +
@@ -13,6 +14,6 @@ Deno.test("reads repeated and folded wheel requirements", () => {
   );
 });
 
-Deno.test("returns no requirements when metadata has none", () => {
+test("returns no requirements when metadata has none", () => {
   assertEquals(parseWheelRequirements("Metadata-Version: 2.4\nName: example\n"), []);
 });

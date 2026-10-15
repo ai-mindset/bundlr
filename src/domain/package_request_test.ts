@@ -1,4 +1,5 @@
-import { assertEquals, assertThrows } from "jsr:@std/assert@1.0.14";
+import { test } from "bun:test";
+import { assertEquals, assertThrows } from "../test/assert.ts";
 import {
   InvalidPackageRequestError,
   type PackageRequest,
@@ -15,11 +16,11 @@ const validRequest: PackageRequest = {
   outputDirectory: "dist",
 };
 
-Deno.test("accepts a complete package request", () => {
+test("accepts a complete package request", () => {
   assertEquals(validatePackageRequest(validRequest), validRequest);
 });
 
-Deno.test("requires at least one target", () => {
+test("requires at least one target", () => {
   assertThrows(
     () => validatePackageRequest({ ...validRequest, targets: [] }),
     InvalidPackageRequestError,
@@ -27,7 +28,7 @@ Deno.test("requires at least one target", () => {
   );
 });
 
-Deno.test("rejects duplicate targets", () => {
+test("rejects duplicate targets", () => {
   assertThrows(
     () =>
       validatePackageRequest({
@@ -39,7 +40,7 @@ Deno.test("rejects duplicate targets", () => {
   );
 });
 
-Deno.test("rejects unsafe empty or padded values", () => {
+test("rejects unsafe empty or padded values", () => {
   assertThrows(
     () => validatePackageRequest({ ...validRequest, command: " example-app" }),
     InvalidPackageRequestError,
@@ -47,7 +48,7 @@ Deno.test("rejects unsafe empty or padded values", () => {
   );
 });
 
-Deno.test("rejects application names that are unsafe as directory names", () => {
+test("rejects application names that are unsafe as directory names", () => {
   assertThrows(
     () => validatePackageRequest({ ...validRequest, applicationName: "../Example" }),
     InvalidPackageRequestError,

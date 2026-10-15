@@ -11,11 +11,7 @@ export function buildTargetInstallInvocation(
     throw new Error("Use the staged Git install flow for Git sources.");
   }
 
-  return buildBinaryInstallInvocation(
-    request.source.requirement,
-    distribution,
-    destination,
-  );
+  return buildBinaryInstallInvocation(request.source.requirement, distribution, destination);
 }
 
 export function buildGitRootInstallInvocation(

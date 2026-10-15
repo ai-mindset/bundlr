@@ -22,18 +22,18 @@ export async function runInvocation(
   invocation: Invocation,
   options: ProcessOptions = {},
 ): Promise<ProcessResult> {
-  const child = new Deno.Command(executable, {
-    args: [...invocation.args],
-    env: { ...invocation.env },
-    stdin: "null",
-    stdout: "piped",
-    stderr: "piped",
+  const child = Bun.spawn([executable, ...invocation.args], {
+    env: { ...process.env, ...invocation.env },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
     signal: options.signal,
-  }).spawn();
+    windowsHide: true,
+  });
 
   const stdout: string[] = [];
-  const [status] = await Promise.all([
-    child.status,
+  const [code] = await Promise.all([
+    child.exited,
     consumeText(child.stdout, (text) => {
       if (options.captureStdout === true) stdout.push(text);
       options.events?.stdout?.(text);
@@ -42,8 +42,8 @@ export async function runInvocation(
   ]);
 
   return {
-    success: status.success,
-    code: status.code,
+    success: code === 0,
+    code,
     ...(options.captureStdout === true ? { stdout: stdout.join("") } : {}),
   };
 }
@@ -57,12 +57,18 @@ async function consumeText(
     return;
   }
 
-  const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
   try {
     while (true) {
       const { done, value } = await reader.read();
-      if (done) return;
-      listener(value);
+      if (done) {
+        const finalText = decoder.decode();
+        if (finalText) listener(finalText);
+        return;
+      }
+      const text = decoder.decode(value, { stream: true });
+      if (text) listener(text);
     }
   } finally {
     reader.releaseLock();

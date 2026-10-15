@@ -2,8 +2,7 @@ import type { TargetPlatform } from "../domain/package_request.ts";
 
 const PYTHON_BUILD = "20260718";
 const PYTHON_VERSION = "3.12.13";
-const RELEASE_BASE =
-  `https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD}`;
+const RELEASE_BASE = `https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD}`;
 
 export interface PythonDistribution {
   readonly target: TargetPlatform;
@@ -54,8 +53,7 @@ export function selectPythonDistribution(
   }
 
   const distribution = DISTRIBUTIONS[target];
-  const filename =
-    `cpython-${PYTHON_VERSION}+${PYTHON_BUILD}-${distribution.triple}-install_only_stripped.tar.gz`;
+  const filename = `cpython-${PYTHON_VERSION}+${PYTHON_BUILD}-${distribution.triple}-install_only_stripped.tar.gz`;
   return {
     target,
     pythonVersion: PYTHON_VERSION,
