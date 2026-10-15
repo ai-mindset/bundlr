@@ -1,7 +1,7 @@
 # Bundlr 📦
 
 Bundlr turns a Python application from PyPI or HTTPS Git into a self-contained, double-clickable
-application for Windows, macOS, and Linux. Recipients do not need Python, uv, Deno, or Bundlr.
+application for Windows, macOS, and Linux. Recipients do not need Python, uv, Bun, or Bundlr.
 
 ## Package an application
 
@@ -27,14 +27,14 @@ Each target produces:
 
 ## Build Windows applications on Linux or macOS
 
-Run these commands from a Bundlr source checkout. Bundlr prepares its pinned `uv` executable
-automatically; the generated applications do not require Python, Deno, Bundlr, `uv`, or a virtual
-environment on the Windows machine.
+Run `bun ci` once in the Bundlr source checkout, then use the commands below. Bundlr prepares its
+pinned `uv` executable automatically; the generated applications do not require Python, Bun,
+Bundlr, `uv`, or a virtual environment on the Windows machine.
 
 ### GUI example: PipUI
 
 ```sh
-deno task package \
+bun run package \
   --name PipUI \
   --command pip-ui \
   --kind windowed \
@@ -60,7 +60,7 @@ PipUI-windows-x86_64\PipUI.exe
 ### CLI example: Black
 
 ```sh
-deno task package \
+bun run package \
   --name Black \
   --command black \
   --kind console \
@@ -114,10 +114,11 @@ if ($actual -ine $expected) { throw "SHA-256 verification failed" }
 Write-Host "SHA-256 verification passed"
 ```
 
-## Verified Linux-to-Windows applications
+## Previously verified Linux-to-Windows applications
 
-PipUI 0.2.0 and Black 26.5.1 were bundled on Linux, copied to a Windows machine without a Python installation, 
-and launched successfully. PipUI opened as a normal desktop application:
+PipUI 0.2.0 and Black 26.5.1 were bundled with the earlier build pipeline on Linux, copied to a
+Windows machine without a Python installation, and launched successfully. The Bun build has not
+yet repeated this clean-device check. PipUI opened as a normal desktop application:
 
 ![PipUI 0.2.0 running on Windows after being bundled on Linux](assets/pipui.png)
 
@@ -159,17 +160,20 @@ prevents a Linux binary from being accidentally delivered in a Windows or macOS 
 
 ## Development
 
-Requires Deno 2.9.4 or later.
+Requires Bun 1.4.3 or later.
 
 ```sh
-deno task check
-deno task test
-deno task build
+bun ci
+bun run lint:format
+bun run typecheck
+bun test
+bun run build
 ```
 
 `build` creates the host command-line executable under `dist`; `build:cli` is its explicit
-equivalent. The experimental desktop interface remains available through `desktop:dev` and
-`desktop:build`, but desktop installers are not published as release artifacts.
+equivalent. The experimental desktop interface is available through `bun run desktop:dev` and
+`bun run desktop:build`. It opens a local browser page; use **Quit Bundlr** to stop the server,
+or close the page. Desktop builds are not published as release artifacts.
 
 GitHub Actions verifies and builds Bundlr CLI executables for Linux x64, Windows x64, macOS ARM64,
 and macOS Intel. It publishes those executables when a `v*` tag is pushed. Client applications are

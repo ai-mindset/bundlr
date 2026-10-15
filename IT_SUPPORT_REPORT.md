@@ -33,7 +33,7 @@ Do not create broad allow-list rules for temporary or user-writable directories.
 | Build date and machine  | [UTC timestamp, controlled builder]                       |
 | Publisher               | Unsigned; no publisher certificate is currently available |
 
-The application is self-contained. It does not require or contain Bundlr, Deno, or uv, and it does
+The application is self-contained. It does not require or contain Bundlr, Bun, or uv, and it does
 not use an existing Python installation.
 
 ## Behaviour
@@ -71,7 +71,7 @@ security sandbox.
 | Validation                   | [double-click action and expected result] |
 | Removal / rollback           | [managed process and retained user data]  |
 
-Validate on a representative standard-user device without Python, uv, Deno, or Bundlr installed.
+Validate on a representative standard-user device without Python, uv, Bun, or Bundlr installed.
 Removal must not delete unrelated Python installations, applications, or user documents.
 
 ## Approval
