@@ -17,6 +17,7 @@ import {
 } from "./target_install.ts";
 import { readWheelRequirements } from "./wheel_metadata.ts";
 import { BUNDLR_VERSION } from "../version.ts";
+import { UV_VERSION } from "../uv_version.ts";
 
 export interface PackageResult {
   readonly artifactPath: string;
@@ -40,6 +41,10 @@ export async function packageApplication(
   const distribution = selectPythonDistribution(target, request.python);
   const artifactPath = expectedArtifactPath(request);
   await requireAbsent(artifactPath);
+  const uv = await resolveUvExecutable({
+    signal,
+    onDownload: () => events.stderr?.(`Downloading and verifying uv ${UV_VERSION}...\n`),
+  });
   await mkdir(request.outputDirectory, { recursive: true });
 
   const temporaryDirectory = await makeTempDir({
@@ -54,7 +59,6 @@ export async function packageApplication(
     await materializePythonRuntime(distribution, paths.runtime, signal);
 
     events.stderr?.(`Installing target-compatible wheels for ${target}...\n`);
-    const uv = await resolveUvExecutable();
     if (request.source.kind === "pypi") {
       await requireSuccessfulInstall(
         uv,

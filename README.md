@@ -27,9 +27,10 @@ Each target produces:
 
 ## Build Windows applications on Linux or macOS
 
-Run `bun ci` once in the Bundlr source checkout, then use the commands below. Bundlr prepares its
-pinned `uv` executable automatically; the generated applications do not require Python, Bun,
-Bundlr, `uv`, or a virtual environment on the Windows machine.
+Run `bun ci` once in the Bundlr source checkout, then use the commands below. On the first package
+build, Bundlr downloads the pinned host `uv` release, verifies its SHA-256 checksums, and caches the
+executable for later offline use. The generated applications do not require Python, Bun, Bundlr,
+`uv`, or a virtual environment on the Windows machine.
 
 ### GUI example: PipUI
 
@@ -174,6 +175,11 @@ bun run build
 equivalent. The experimental desktop interface is available through `bun run desktop:dev` and
 `bun run desktop:build`. It opens a local browser page; use **Quit Bundlr** to stop the server,
 or close the page. Desktop builds are not published as release artifacts.
+
+The CLI does not embed `uv`. The first package build or `--diagnose` downloads and verifies the
+pinned host release; `--help` and `--version` work without a network connection. Set
+`BUNDLR_UV_EXECUTABLE` to an existing executable only when you explicitly want to use that local
+copy instead of Bundlr's verified download.
 
 GitHub Actions verifies and builds Bundlr CLI executables for Linux x64, Windows x64, macOS ARM64,
 and macOS Intel. It publishes those executables when a `v*` tag is pushed. Client applications are

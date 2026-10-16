@@ -48,7 +48,11 @@ export async function main(args: readonly string[]): Promise<number> {
     }
     if (packageArgs[0] === "--diagnose") {
       console.log(`Bundlr ${BUNDLR_VERSION}`);
-      console.log(await diagnoseUv());
+      console.log(
+        await diagnoseUv({
+          onDownload: () => console.error("Downloading and verifying uv..."),
+        }),
+      );
       console.log("Runtime diagnostic passed.");
       return 0;
     }
