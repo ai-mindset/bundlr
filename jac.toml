@@ -1,0 +1,21 @@
+[project]
+name = "bundlr"
+version = "0.2.0-dev"
+jac-version = "0.39.0"
+entry-point = "src.main"
+kind = "cli-native"
+
+[placement]
+default = "native"
+
+[placement.pins]
+"ui.main" = "client"
+"scripts.*" = "server"
+"tests.tooling_test" = "server"
+
+[test]
+directory = "tests"
+
+[check.lint]
+select = ["default"]
+

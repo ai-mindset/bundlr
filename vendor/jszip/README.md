@@ -1,3 +1,5 @@
-# Vendored JSZip 3.10.1
+# Former JSZip dependency
 
-`jszip.min.js`, `index.d.ts`, and `LICENSE.markdown` are from the JSZip 3.10.1 npm distribution. This self-contained build supplies ZIP read/write support for Bun builds without registry access at runtime.
+The Bun implementation used JSZip 3.10.1 from the npm distribution. Its original
+licence notice is retained in `LICENSE.markdown`; the Jac implementation uses
+libarchive and no longer includes JSZip code in the repository or releases.

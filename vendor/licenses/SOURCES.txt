@@ -1,0 +1,12 @@
+Jac native standard library, support runtime and generated browser prelude:
+https://github.com/jaseci-labs/jaseci/blob/main/LICENSE
+The compiler version is pinned in build-lock.json.
+
+LLVM compiler-rt notice: copied unchanged from the pinned Jac 0.39.0 compiler
+distribution, jaclang/compiler/backends/native/compiler_rt/LICENSE.txt.
+
+zlib notice: copied unchanged from the pinned Jac 0.39.0 distribution's
+python/licenses/zlib/LICENSE. Jac links zlib for native gzip and CRC32.
+
+Native shared-library licences are collected from the pinned vcpkg checkout.
+The uv release and certifi CA bundle carry their own provenance and licences.
