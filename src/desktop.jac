@@ -19,14 +19,19 @@ import from src.platform.ffi_uv { uv_run, uv_default_loop, uv_loop_alive }
 import from src.platform.cancellation { cancellation_requested }
 
 obj QuietEvents(ProcessEvents) {
-    override def stdout(text: str) {}
-    override def stderr(text: str) {}
+    override def stdout(text: str) {
+        _ = text;
+    }
+
+    override def stderr(text: str) {
+        _ = text;
+    }
 }
 
 obj BrowserEvents(BuildEvents) {
     has connection: Connection;
 
-    def send(value: dict[str, any]) {
+    def send(value: dict[str, str | list[dict[str, str]]]) {
         self.connection.chunk(json.dumps(value) + "\n");
     }
 

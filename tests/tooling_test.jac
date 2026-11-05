@@ -8,7 +8,7 @@ import from pathlib { Path }
 import from scripts.build { copy_libraries }
 
 def:pub check_tooling {
-    lock = json.loads(Path("build-lock.json").read_text());
+    lock = json.loads(Path("build-lock.json").read_text()) as dict[str, object];
     with tempfile.TemporaryDirectory(prefix="bundlr-tooling-") as temporary {
         base = Path(temporary);
         source = base / "source";

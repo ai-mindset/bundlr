@@ -252,21 +252,41 @@ obj:pub Extractor {
     }
 }
 
-def:pub tree_entries(directory: str) -> Iterator[str] {
-    yield directory;
-    if stat_path(directory).is_dir() {
-        for name in list_dir(directory) {
-            yield from tree_entries(join_path(directory, name));
+obj:pub PathCursor {
+    has pending: list[str],
+        deferred: list[str] = [],
+        deferred_index: int = 0;
+
+    def advance -> str {
+        if len(self.pending) > 0 {
+            path = self.pending.pop();
+            if stat_path(path).is_dir() {
+                names = list_dir(path);
+                for index in range(len(names) - 1, -1, -1) {
+                    self.pending.append(join_path(path, names[index]));
+                }
+            }
+            return path;
         }
+        while self.deferred_index < len(self.deferred) {
+            path = self.deferred[self.deferred_index];
+            self.deferred_index += 1;
+            if not stat_path(path).exists {
+                return path;
+            }
+        }
+        return "";
     }
 }
 
-def archive_entries(directory: str, metadata: ArchiveMetadata) -> Iterator[str] {
-    yield from tree_entries(directory);
-    for path in sorted(metadata.symlinks) {
-        if not stat_path(path).exists {
-            yield path;
+def:pub tree_entries(directory: str) -> Iterator[str] {
+    cursor = PathCursor(pending=[directory]);
+    while True {
+        path = cursor.advance();
+        if path == "" {
+            return;
         }
+        yield path;
     }
 }
 
@@ -277,7 +297,7 @@ obj:pub ArchiveWriter {
         handle: ptr = ptr(),
         memory: ptr[u8] = ptr[u8](),
         fd: int = -1,
-        paths: Iterator[str] | None = None,
+        paths: PathCursor | None = None,
         done: bool = False,
         entry_count: int = 0,
         source_bytes: int = 0,
@@ -315,7 +335,9 @@ obj:pub ArchiveWriter {
                 int(archive_write_open_filename(self.handle, self.destination)),
                 self.handle
             );
-            self.paths = archive_entries(self.source, self.metadata);
+            self.paths = PathCursor(
+                pending=[self.source], deferred=sorted(self.metadata.symlinks)
+            );
         } except Exception {
             self.close(False);
             raise;
@@ -355,7 +377,7 @@ obj:pub ArchiveWriter {
         if paths is None {
             raise RuntimeError("Archive writer was not started.");
         }
-        path = next(paths, "");
+        path = paths.advance();
         if path == "" {
             self.close(True);
             return;

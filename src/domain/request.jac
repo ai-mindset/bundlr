@@ -235,7 +235,7 @@ def:pub parse_cli(args: list[str]) -> PackageRequest {
     );
 }
 
-def json_string(value: dict[str, any], key: str, fallback: str) -> str {
+def json_string(value: dict[str, object], key: str, fallback: str) -> str {
     if key not in value {
         return fallback;
     }
@@ -251,7 +251,7 @@ def:pub decode_request(body: str) -> PackageRequest {
     if not isinstance(parsed, dict) {
         raise ValueError("Invalid package request.");
     }
-    value = parsed as dict[str, any];
+    value = parsed as dict[str, object];
     if value.get("applicationKind") == "" {
         raise ValueError("Application kind must be auto, console, or windowed.");
     }

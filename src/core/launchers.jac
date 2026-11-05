@@ -1,4 +1,5 @@
 import zlib;
+import json;
 import from src.domain.request { PackageRequest }
 import from src.core.metadata { EntryPoint }
 import from src.platform.files {
@@ -11,9 +12,13 @@ import from src.platform.files {
 }
 
 def python_launcher(point: EntryPoint, packages: str) -> str {
-    return "import sys\nimport site\n"
+    return "import sys\nimport site\nimport os\n"
         + packages
         + "\n"
+        # Windows locates packages using the executable path before argv[0] changes.
+        + "sys.argv[0] = os.path.join(os.path.dirname(sys.argv[0]), "
+        + json.dumps(point.command, ensure_ascii=False)
+        + ")\n"
         + f"import {point.module} as _bundlr_module\nraise SystemExit(_bundlr_module.{'.'.join(
             point.attributes
         )}())\n";
@@ -106,7 +111,7 @@ def:pub create_launcher(
         shebang = f"#!<launcher_dir>\\runtime\\{python_name} -I -B\n";
         main = python_launcher(
             point,
-            "import os\nsite.addsitedir(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'packages'))"
+            "site.addsitedir(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'packages'))"
         );
         write_bytes(
             join_path(artifact, name + ".exe"),

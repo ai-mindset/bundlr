@@ -19,7 +19,7 @@ with entry:__main__ {
     check_tooling();
     output = Path(args.output).resolve();
     output.mkdir(parents=True, exist_ok=True);
-    lock = json.loads(Path("build-lock.json").read_text());
+    lock = json.loads(Path("build-lock.json").read_text()) as dict[str, object];
     copy_libraries(
         Path(args.native_libs).resolve(),
         output,

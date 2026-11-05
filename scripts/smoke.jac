@@ -62,7 +62,7 @@ def wait_status(prefix: str, timeout: float = 180.0) -> str {
     );
 }
 
-def browser_acceptance(origin: str, directory: Path, process: any) {
+def browser_acceptance(origin: str, directory: Path, process: subprocess.Popen[bytes]) {
     try {
         browse(["open", origin]);
         assert browse(["get", "title"]) == "Bundlr";

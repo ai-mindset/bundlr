@@ -12,8 +12,9 @@ obj ForwardEvents(ProcessEvents) {
     }
 }
 
+glob args = sys.argv[1:];
+
 with entry {
-    args = sys.argv[1:];
     if len(args) == 0 {
         sys.`exit(2);
     }

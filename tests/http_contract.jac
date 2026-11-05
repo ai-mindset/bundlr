@@ -1,6 +1,20 @@
 import from src.platform.http { Connection, HttpServer, HttpHandler }
 import from src.platform.ffi_uv { calloc, free }
-import from src.desktop { DesktopHandler }
+import from src.desktop { DesktopHandler, BrowserEvents }
+import json;
+
+obj RecordingStream(Connection) {
+    has chunks: list[str] = [],
+        endings: int = 0;
+
+    override def chunk(text: str) {
+        self.chunks.append(text);
+    }
+
+    override def finish_stream {
+        self.endings += 1;
+    }
+}
 
 obj MemoryConnection(Connection) {
     has status: int = 0,
@@ -9,6 +23,7 @@ obj MemoryConnection(Connection) {
     override def respond(
         status: int, body: bytes = b"", content_type: str = "text/plain; charset=utf-8"
     ) {
+        _ = content_type;
         self.status = status;
         self.response = body;
         self.close_after_write = True;
@@ -41,6 +56,32 @@ def feed(connection: Connection, body: bytes) {
 }
 
 def:pub check_http {
+    recording = RecordingStream(stream=ptr());
+    events = BrowserEvents(connection=recording);
+    events.stdout("stdout\n");
+    events.stderr("stderr\n");
+    events.failed("failure");
+    events.finished([{"archivePath": "application.zip", "target": "windows-x86_64"}]);
+    assert len(recording.chunks) == 4;
+    for (index, name) in [(0, "stdout"), (1, "stderr")] {
+        output = json.loads(recording.chunks[index]);
+        assert len(output) == 3;
+        assert output["type"] == "output";
+        assert output["stream"] == name;
+        assert output["text"] == name + "\n";
+    }
+    failure = json.loads(recording.chunks[2]);
+    assert len(failure) == 2;
+    assert failure["type"] == "error";
+    assert failure["message"] == "failure";
+    result = json.loads(recording.chunks[3]);
+    assert len(result) == 2;
+    assert result["type"] == "done";
+    assert len(result["results"]) == 1;
+    assert len(result["results"][0]) == 2;
+    assert result["results"][0]["archivePath"] == "application.zip";
+    assert result["results"][0]["target"] == "windows-x86_64";
+    assert recording.endings == 2;
     handler = RecordingHandler();
     server = HttpServer(handler=handler);
     server.prepare();

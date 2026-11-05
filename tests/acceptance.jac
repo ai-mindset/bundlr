@@ -69,6 +69,9 @@ import subprocess
 from pathlib import Path
 
 def main():
+    assert Path(sys.argv[0]).name == 'git-demo', sys.argv
+    assert Path(sys.argv[0]).parent == Path(__file__).parent.parent, sys.argv
+    assert sys.argv[1:] == ['literal spaces; $(safe)', 'quoted "value"'], sys.argv
     import packaging
     if sys.platform == 'win32':
         import colorama
@@ -80,6 +83,9 @@ def main():
     return 0
 
 def window():
+    assert Path(sys.argv[0]).name == 'git-window', sys.argv
+    assert Path(sys.argv[0]).parent == Path(__file__).parent.parent, sys.argv
+    assert sys.argv[1:] == [], sys.argv
     import tkinter
     root = tkinter.Tk()
     root.title('Bundlr GUI acceptance')
@@ -142,7 +148,17 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
         )
     );
     run(["git", "init", "--initial-branch=main", str(directory)]);
-    run(["git", "-C", str(directory), "add", "."]);
+    run(
+        [
+            "git",
+            "-C",
+            str(directory),
+            "add",
+            "pyproject.toml",
+            "application.py",
+            "backend.py"
+        ]
+    );
     run(
         [
             "git",
@@ -277,6 +293,12 @@ def recipient_environment -> dict[str, str] {
     return environment;
 }
 
+def recipient_arguments(name: str) -> list[str] {
+    return ["--version"]
+        if name == "Black"
+        else ["literal spaces; $(safe)", "quoted \"value\""];
+}
+
 def consume(directory: str, output: str, target: str) {
     for name in ["Black", "GitDemo"] {
         archive = join_path(directory, name + "-" + target + ".tar.gz");
@@ -288,14 +310,13 @@ def consume(directory: str, output: str, target: str) {
         run(["tar", "-xzf", archive, "-C", extracted]);
         verify_evidence(artifact_path(extracted, name, target), target);
         result = run(
-            [launcher(extracted, name, target)]
-                + (["--version"] if name == "Black" else []),
+            [launcher(extracted, name, target)] + recipient_arguments(name),
             recipient_environment()
         );
         assert (
             "black, " + BLACK_VERSION if name == "Black" else "Bundlr Git acceptance:"
         )
-            in result;
+            in result , result;
     }
     print("Cross-built Black and Git archives launched on " + target + ".");
 }
@@ -338,8 +359,7 @@ def accept(binary: str, output: str, all_targets: bool) {
             );
             if selected == target {
                 result = run(
-                    [launcher(extracted, name, selected)]
-                        + (["--version"] if name == "Black" else []),
+                    [launcher(extracted, name, selected)] + recipient_arguments(name),
                     recipient_environment()
                 );
                 assert (
@@ -347,7 +367,7 @@ def accept(binary: str, output: str, all_targets: bool) {
                         if name == "Black"
                         else "Bundlr Git acceptance:"
                 )
-                    in result;
+                    in result , result;
             }
         }
     }

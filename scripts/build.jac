@@ -24,7 +24,7 @@ def run(args: list[str], cwd: Path | None = None) {
     subprocess.run(args, cwd=cwd, check=True);
 }
 
-def native_dependencies(target: str, lock: dict[str, any]) -> Path {
+def native_dependencies(target: str, lock: dict[str, object]) -> Path {
     triplets = {
         "linux-x86_64": "bundlr-x64-linux",
         "windows-x86_64": "bundlr-x64-windows",
@@ -71,7 +71,7 @@ def native_dependencies(target: str, lock: dict[str, any]) -> Path {
 def:pub copy_libraries(
     source: Path,
     destination: Path,
-    lock: dict[str, any],
+    lock: dict[str, object],
     development: bool,
     target: str
 ) {
@@ -207,8 +207,12 @@ def audit_runtime(directory: Path, target: str) {
 }
 
 def size_report(
-    directory: Path, archive: Path, target: str, development: bool, lock: dict[str, any]
-) -> dict[str, any] {
+    directory: Path,
+    archive: Path,
+    target: str,
+    development: bool,
+    lock: dict[str, object]
+) -> dict[str, str | int | bool] {
     executable = directory / ("bundlr.exe" if target == "windows-x86_64" else "bundlr");
     total = sum(
         path.stat().st_size
@@ -231,10 +235,10 @@ def size_report(
         ),
         "nativeLibraryBytes": libraries,
         "developmentLibraries": development,
-        "jacVersion": lock["jacVersion"],
-        "vcpkgBaseline": lock["vcpkgBaseline"]
+        "jacVersion": str(lock["jacVersion"]),
+        "vcpkgBaseline": str(lock["vcpkgBaseline"])
     };
-    limit = int(lock["maximumArtifactBytes"]);
+    limit = int(lock["maximumArtifactBytes"] as int);
     if executable.stat().st_size >= limit or archive.stat().st_size >= limit {
         raise RuntimeError(
             "The complete release exceeds the 50 MiB budget: "
@@ -244,7 +248,7 @@ def size_report(
     return measurements;
 }
 
-def prepare_ca(portable: Path, lock: dict[str, any], development: bool) {
+def prepare_ca(portable: Path, lock: dict[str, object], development: bool) {
     if development and Path("/etc/ssl/certs/ca-certificates.crt").exists() {
         shutil.copy2(
             "/etc/ssl/certs/ca-certificates.crt", portable / "data/cacert.pem"
@@ -306,7 +310,7 @@ def publish_directory(source: Path, destination: Path) {
 }
 
 def:pub build(args: argparse.Namespace) {
-    lock = json.loads((ROOT / "build-lock.json").read_text());
+    lock = json.loads((ROOT / "build-lock.json").read_text()) as dict[str, object];
     compiler = shutil.which("jac");
     if compiler is None {
         raise RuntimeError("jac is not on PATH.");

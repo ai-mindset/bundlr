@@ -11,7 +11,7 @@ import from src.platform.ffi_uv {
 
 glob _requested: bool = False;
 
-def on_signal(handle: ptr, signum: i32) {
+def on_signal(_handle: ptr, _signum: i32) {
     _requested = True;
 }
 

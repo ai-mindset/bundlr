@@ -84,9 +84,8 @@ obj:pub Child {
         pid: int = 0,
         timer: ptr = ptr(),
         decoder_out: Decoder = Decoder(),
-        decoder_err: Decoder = Decoder();
-
-    has job: ProcessJob | None = None;
+        decoder_err: Decoder = Decoder(),
+        job: ProcessJob | None = None;
 
     def done -> bool {
         complete = self.exited and self.stdout_eof and self.stderr_eof;
@@ -159,7 +158,7 @@ def cancellation_deadline(timer: ptr) {
     child.timer = ptr();
 }
 
-def allocate(stream: ptr, suggested: u64, buffer: &mut Buffer) {
+def allocate(_stream: ptr, _suggested: u64, buffer: &mut Buffer) {
     buffer.base = ptr[u8](calloc(65536, 1));
     buffer.length = 65536;
 }

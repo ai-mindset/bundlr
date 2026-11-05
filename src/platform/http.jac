@@ -79,7 +79,9 @@ obj:pub HttpHandler {
         connection.respond(404, b"Not found");
     }
 
-    def disconnected(connection: Connection) {}
+    def disconnected(connection: Connection) {
+        _ = connection;
+    }
 }
 
 glob _connections: dict[int, Connection] = {},
@@ -310,7 +312,7 @@ def message_complete(parser: ptr) -> i32 {
     return 21;
 }
 
-def allocate(handle: ptr, suggested: u64, buffer: &mut Buffer) {
+def allocate(_handle: ptr, _suggested: u64, buffer: &mut Buffer) {
     buffer.base = ptr[u8](calloc(65536, 1));
     buffer.length = 65536;
 }

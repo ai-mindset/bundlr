@@ -44,7 +44,9 @@ import from src.platform.archives {
     Extractor,
     archive_name,
     check_zip_limits,
-    ArchiveMetadata
+    ArchiveMetadata,
+    PathCursor,
+    tree_entries
 }
 
 obj QuietEvents(BuildEvents) {
@@ -59,7 +61,9 @@ obj QuietEvents(BuildEvents) {
         self.errors += text;
     }
 
-    override def finished(results: list[dict[str, str]]) {}
+    override def finished(results: list[dict[str, str]]) {
+        _ = results;
+    }
 }
 
 def pump(child: Child) {
@@ -348,6 +352,37 @@ def extract(source: str, destination: str, strip: bool = True) {
     }
 }
 
+def check_path_cursor(base: str) {
+    directory = join_path(base, "cursor");
+    nested = join_path(directory, "a");
+    empty = join_path(nested, "empty");
+    file = join_path(nested, "file.txt");
+    last = join_path(directory, "z.txt");
+    make_dirs(empty);
+    write_text(file, "nested");
+    write_text(last, "last");
+    expected = [directory, nested, empty, file];
+    if sys.platform != "win32" {
+        link = join_path(directory, "link");
+        symlink_file("a", link);
+        expected.append(link);
+    }
+    expected.append(last);
+    assert list(tree_entries(directory)) == expected;
+    virtual = join_path(directory, "virtual");
+    cursor = PathCursor(pending=[directory], deferred=[virtual, last]);
+    actual: list[str] = [];
+    while True {
+        path = cursor.advance();
+        if path == "" {
+            break;
+        }
+        actual.append(path);
+    }
+    assert actual == expected + [virtual];
+    assert cursor.advance() == "";
+}
+
 def check_archives(base: str) {
     source = join_path(base, "archive source");
     make_dirs(source);
@@ -594,6 +629,7 @@ with entry {
         check_default_entry_point(staging);
         print("Wheel and entry-point contracts passed.");
         check_archives(staging);
+        check_path_cursor(staging);
         check_archive_metadata(staging);
         check_windows_launchers(staging);
         print(

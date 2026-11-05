@@ -192,7 +192,7 @@ def metadata_header(metadata: str, name: str, fallback: str) -> str {
 def:pub write_manifest(
     request: PackageRequest, directory: str, target: str, point: EntryPoint
 ) {
-    value: dict[str, any] = {
+    value: dict[str, str | int] = {
         "formatVersion": 1,
         "applicationName": request.applicationName,
         "applicationKind": request.applicationKind,
@@ -242,7 +242,10 @@ def:pub write_dependencies(directory: str, packages: str) {
             }
         }
     }
-    value: dict[str, any] = {"formatVersion": 1, "dependencies": dependencies};
+    value: dict[str, int | list[dict[str, str]]] = {
+        "formatVersion": 1,
+        "dependencies": dependencies
+    };
     write_text(
         join_path(directory, "bundlr-dependencies.json"), json.dumps(value) + "\n"
     );

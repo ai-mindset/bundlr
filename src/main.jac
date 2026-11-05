@@ -37,7 +37,10 @@ Sources: name[extras]==version or HTTPS Git URL, optionally with @revision
 obj DiagnosticEvents(ProcessEvents) {
     has errors: str = "";
 
-    override def stdout(text: str) {}
+    override def stdout(text: str) {
+        _ = text;
+    }
+
     override def stderr(text: str) {
         self.errors += text;
     }
