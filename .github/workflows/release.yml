@@ -136,7 +136,21 @@ jobs:
       - name: Check browser UI and package real applications on Linux
         if: matrix.target == 'linux-x86_64'
         run: |
-          jac run scripts/smoke.jac --runtime dist/bundlr-linux-x86_64 --browser
+          BUNDLR_SMOKE_CHROME="$(command -v google-chrome)"
+          export BUNDLR_SMOKE_CHROME
+          export BUNDLR_SMOKE_CHROME_LOG="$RUNNER_TEMP/bundlr-chrome.log"
+          cat > "$RUNNER_TEMP/bundlr-chrome" <<'BROWSER'
+          #!/bin/sh
+          exec "$BUNDLR_SMOKE_CHROME" "$@" 2>>"$BUNDLR_SMOKE_CHROME_LOG"
+          BROWSER
+          chmod +x "$RUNNER_TEMP/bundlr-chrome"
+          export JACBROWSER_CHROME="$RUNNER_TEMP/bundlr-chrome"
+          if ! jac run scripts/smoke.jac --runtime dist/bundlr-linux-x86_64 --browser; then
+            if [ -f "$BUNDLR_SMOKE_CHROME_LOG" ]; then
+              cat "$BUNDLR_SMOKE_CHROME_LOG"
+            fi
+            exit 1
+          fi
           dist/bundlr-linux-x86_64/bundlr --name Black --command black --target all --output .build/applications black==26.5.1
           .build/applications/Black-linux-x86_64/Black --version
           tar -czf applications.tar.gz -C .build/applications .
