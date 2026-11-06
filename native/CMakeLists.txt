@@ -13,10 +13,12 @@ find_library(LLHTTP_ARCHIVE NAMES llhttp libllhttp PATHS "${PREFIX}/lib" NO_DEFA
 # objects as a shared library; no application C wrapper or runtime is introduced.
 if(WIN32)
   set(LLHTTP_SHARED "${CMAKE_BINARY_DIR}/llhttp.dll")
+  # Match the triplet's static CRT and retain DLL startup for its initialization.
   add_custom_command(OUTPUT "${LLHTTP_SHARED}"
-    COMMAND "${CMAKE_LINKER}" /DLL /NOENTRY "/OUT:${LLHTTP_SHARED}"
+    COMMAND "${CMAKE_LINKER}" /DLL "/OUT:${LLHTTP_SHARED}"
       "/WHOLEARCHIVE:${LLHTTP_ARCHIVE}"
       /EXPORT:llhttp_init /EXPORT:llhttp_execute /EXPORT:llhttp_get_method
+      libcmt.lib libvcruntime.lib libucrt.lib kernel32.lib
     DEPENDS "${LLHTTP_ARCHIVE}" VERBATIM)
 elseif(APPLE)
   set(LLHTTP_SHARED "${CMAKE_BINARY_DIR}/libllhttp.dylib")
