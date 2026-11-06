@@ -24,6 +24,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install pinned Jac
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o /tmp/install-jac.sh
           bash /tmp/install-jac.sh --version "$JAC_VERSION"
@@ -107,6 +109,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install pinned Jac
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o /tmp/install-jac.sh
           bash /tmp/install-jac.sh --version "$JAC_VERSION"
