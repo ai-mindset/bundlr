@@ -60,6 +60,8 @@ jobs:
           repository: microsoft/vcpkg
           ref: ${{ env.VCPKG_BASELINE }}
           path: .build/vcpkg
+          # Version overrides resolve historical port trees, including llhttp 9.2.1.
+          fetch-depth: 0
       - name: Install Linux build tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build patchelf autoconf automake libtool
@@ -283,4 +285,17 @@ jobs:
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/* --generate-notes --verify-tag
+        run: |
+          # A retry may follow a successful publish whose response was lost.
+          if is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)"; then
+            if [ "$is_draft" != false ]; then
+              echo "::error::Existing release is a draft; inspect it before retrying."
+              exit 1
+            fi
+            existing_assets="$(mktemp -d "$RUNNER_TEMP/bundlr-release-XXXXXXXX")"
+            gh release download "$GITHUB_REF_NAME" --dir "$existing_assets"
+            diff -qr -- release "$existing_assets"
+            echo "Existing release assets match this verified build."
+          else
+            gh release create "$GITHUB_REF_NAME" release/* --generate-notes --verify-tag
+          fi
