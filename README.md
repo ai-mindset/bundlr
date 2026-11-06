@@ -154,7 +154,10 @@ Native builds reject Python fallback. No registry JavaScript dependencies are ne
 `--native-libs PATH --target TARGET` consumes a dependency bundle produced on that
 target. Its target, baseline and hashes must match. This permits Windows native
 cross-compilation from Linux. The dependency bundle must preserve relative symlinks.
-macOS compilation uses the appropriate macOS host and SDK.
+macOS releases compile on an ARM Mac using Jac 0.39.0. The Intel release uses
+`--target-triple x86_64-apple-darwin` and libraries built on Intel macOS; both Mac
+architectures retain the library-path audit. Native acceptance runs on each target
+architecture, including Intel macOS, without requiring a Jac compiler there.
 
 `--development-libs PATH` permits local shared libraries for diagnosis. Its outputs
 are named `bundlr-dev-*` and are never release evidence. `--prepared-uv` reuses

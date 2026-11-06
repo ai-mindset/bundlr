@@ -5,7 +5,8 @@ import os;
 import subprocess;
 import tempfile;
 import from pathlib { Path }
-import from scripts.build { copy_libraries }
+import from unittest.mock { patch }
+import from scripts.build { audit_runtime, copy_libraries }
 
 def:pub check_tooling {
     lock = json.loads(Path("build-lock.json").read_text()) as dict[str, object];
@@ -51,7 +52,35 @@ def:pub check_tooling {
         ["jac", "run", "scripts/prepare_uv.jac", "--", "--help"], text=True
     );
     assert "--target TARGET" in help;
-    print("Developer helper reuse and preparation CLI contracts passed.");
+    check_macos_audit();
+    print("Developer helper reuse, preparation CLI and macOS audit contracts passed.");
+}
+
+def check_macos_audit {
+    with tempfile.TemporaryDirectory(prefix="bundlr-macos-audit-") as temporary {
+        directory = Path(temporary);
+        (directory / "bundlr").write_bytes(b"synthetic Mach-O fixture");
+        (directory / "libtest.dylib").write_bytes(b"synthetic dylib fixture");
+        for (dependency, valid) in [
+            ("/usr/lib/libSystem.B.dylib", True),
+            ("@loader_path/libtest.dylib", True),
+            ("/opt/homebrew/lib/libbuilder.dylib", False),
+            ("@loader_path/missing.dylib", False)
+        ] {
+            linked = "fixture:\n\t" + dependency + " (compatibility version 1.0.0)\n";
+            rejected = False;
+            with patch("platform.system", return_value="Darwin"), patch(
+                "platform.machine", return_value="arm64"
+            ), patch("subprocess.check_output", return_value=linked) {
+                try {
+                    audit_runtime(directory, "macos-x86_64");
+                } except RuntimeError {
+                    rejected = True;
+                }
+            }
+            assert rejected != valid;
+        }
+    }
 }
 
 with entry:__main__ {

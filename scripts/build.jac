@@ -156,7 +156,9 @@ def:pub compile_native(source: str, binary: Path, target: str) {
 }
 
 def audit_runtime(directory: Path, target: str) {
-    if target != host_target() {
+    host = host_target();
+    if target != host
+        and not (target.startswith("macos-") and host.startswith("macos-")) {
         return;
     }
     binaries = [
