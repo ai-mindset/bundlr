@@ -8,6 +8,8 @@ import from src.platform.files {
     stat_path,
     list_dir,
     make_dirs,
+    temp_dir,
+    remove_tree,
     open_file,
     close_file,
     read_chunk,
@@ -141,7 +143,7 @@ obj:pub Extractor {
         links: list[DeferredLink] = [],
         link_index: int = 0,
         metadata: ArchiveMetadata = ArchiveMetadata(),
-        case_sensitive: bool = sys.platform != "win32",
+        case_sensitive: bool | None = None,
         member_paths: dict[str, str] = {},
         host_paths: dict[str, str] = {},
         alias_index: int = 0,
@@ -187,10 +189,18 @@ obj:pub Extractor {
     }
 
     def start {
-        if not self.case_sensitive {
-            self.materialize_symlinks = False;
-        }
         make_dirs(self.destination);
+        if self.case_sensitive is None {
+            # Case sensitivity belongs to the destination volume, not the OS.
+            probe = temp_dir(self.destination, ".bundlr-case-");
+            try {
+                self.case_sensitive = not stat_path(
+                    join_path(self.destination, base_name(probe).upper())
+                ).exists;
+            } finally {
+                remove_tree(probe);
+            }
+        }
         self.handle = archive_read_new();
         if self.handle.is_null() {
             raise RuntimeError("Could not initialize archive extraction.");
@@ -232,7 +242,7 @@ obj:pub Extractor {
                         target, 420
                     );
                 } elif self.materialize_symlinks {
-                    symlink_file(link.target, destination);
+                    symlink_file(self.link_target(link, destination), destination);
                 }
                 self.link_index += 1;
                 return;
@@ -294,6 +304,28 @@ obj:pub Extractor {
         } else {
             raise ValueError(f"Unsupported archive member: {name}");
         }
+    }
+
+    def link_target(link: DeferredLink, destination: str) -> str {
+        name = safe_link(link.name, link.target);
+        target = self.member_path(name);
+        if parent_path(destination)
+            == parent_path(join_path(self.destination, link.name))
+            and target == join_path(self.destination, name) {
+            return link.target;
+        }
+        # Keep a materialized Unix link usable when its parent or target has a
+        # backing alias. metadata.symlinks retains the original archive target.
+        parent_parts = parent_path(destination).split("/");
+        target_parts = target.split("/");
+        common = 0;
+        while common < len(parent_parts)
+            and common < len(target_parts)
+            and parent_parts[common] == target_parts[common] {
+            common += 1;
+        }
+        parts = [".."] * (len(parent_parts) - common) + target_parts[common:];
+        return "/".join(parts) if len(parts) > 0 else ".";
     }
 
     def close {

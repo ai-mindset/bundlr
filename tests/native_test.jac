@@ -540,10 +540,30 @@ def check_archive_case_collisions(base: str) {
     metadata.original_paths[join_path(source, "directory-lower")] = join_path(
         source, "lib"
     );
-    link = join_path(source, "virtual-link");
-    metadata.original_paths[link] = join_path(source, "share/terminfo/e/ETERM");
-    metadata.symlinks[link] = "Eterm";
-    metadata.modes[link] = 511;
+    links = [
+        ("virtual-link", "share/terminfo/e/ETERM", "Eterm", "upper payload"),
+        (
+            "lower-link",
+            "lower-alias",
+            "share/terminfo/e/eterm",
+            "different lower payload"
+        ),
+        ("parent-link", "lib/alias", "item", "lower directory"),
+        (
+            "upward-link",
+            "lib/upward",
+            "../share/terminfo/e/eterm",
+            "different lower payload"
+        ),
+        ("self-link", "lib/self", ".", "lower directory"),
+        ("directory-link", "directory-alias", "lib", "lower directory")
+    ];
+    for (stored, original, target, _) in links {
+        link = join_path(source, stored);
+        metadata.original_paths[link] = join_path(source, original);
+        metadata.symlinks[link] = target;
+        metadata.modes[link] = 511;
+    }
     archive = source + ".tar.gz";
     writer = ArchiveWriter(
         source=source, destination=archive, windows_zip=False, metadata=metadata
@@ -553,8 +573,13 @@ def check_archive_case_collisions(base: str) {
         writer.advance();
     }
     destination = source + "-staged";
-    # Exercise Windows naming rules on every host, including Linux CI.
-    reader = Extractor(source=archive, destination=destination, case_sensitive=False);
+    # Exercise case-insensitive staging with virtual links on every host.
+    reader = Extractor(
+        source=archive,
+        destination=destination,
+        case_sensitive=False,
+        materialize_symlinks=False
+    );
     reader.start();
     while not reader.done {
         reader.advance();
@@ -587,22 +612,41 @@ def check_archive_case_collisions(base: str) {
     while not writer.done {
         writer.advance();
     }
-    restored = source + "-restored";
-    final_reader = Extractor(source=repacked, destination=restored);
-    final_reader.start();
-    while not final_reader.done {
-        final_reader.advance();
+    # Restore using volume detection, then force aliases even on Linux so Unix
+    # symlinks to aliased files and directories are covered on every Unix host.
+    for case_sensitive in [None, False] {
+        restored = source + ("-restored" if case_sensitive is None else "-aliased");
+        final_reader = Extractor(
+            source=repacked, destination=restored, case_sensitive=case_sensitive
+        );
+        final_reader.start();
+        assert final_reader.case_sensitive is not None;
+        assert list_dir(restored) == [];
+        while not final_reader.done {
+            final_reader.advance();
+        }
+        if case_sensitive is None {
+            assert final_reader.case_sensitive
+                == (not stat_path(join_path(restored, "sha256sums")).exists);
+        }
+        for (_, original, content) in entries {
+            path = final_reader.metadata.stored_path(join_path(restored, original));
+            assert read_text(path) == content;
+            assert final_reader.metadata.modes[path] == 489;
+        }
+        for (_, original, target, content) in links {
+            path = final_reader.metadata.stored_path(join_path(restored, original));
+            assert final_reader.metadata.symlinks[path] == target;
+            if sys.platform != "win32" {
+                assert stat_path(path).is_link();
+                if stat_path(path, True).is_dir() {
+                    path = join_path(path, "item");
+                }
+                assert read_text(path) == content;
+            }
+        }
+        assert read_text(join_path(restored, "SHA256SUMS")) == sums;
     }
-    for (_, original, content) in entries {
-        path = final_reader.metadata.stored_path(join_path(restored, original));
-        assert read_text(path) == content;
-        assert final_reader.metadata.modes[path] == 489;
-    }
-    final_link = final_reader.metadata.stored_path(
-        join_path(restored, "share/terminfo/e/ETERM")
-    );
-    assert final_reader.metadata.symlinks[final_link] == "Eterm";
-    assert read_text(join_path(restored, "SHA256SUMS")) == sums;
     # Genuine duplicate members must still fail rather than overwrite data.
     metadata.original_paths[join_path(source, "b-lower")] = join_path(
         source, "share/terminfo/e/Eterm"

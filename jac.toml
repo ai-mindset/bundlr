@@ -12,9 +12,10 @@ default = "native"
 "ui.main" = "client"
 "scripts.*" = "server"
 "tests.tooling_test" = "server"
+"tests.runner.*" = "server"
 
 [test]
-directory = "tests"
+directory = "tests/runner"
 
 [check.lint]
 select = ["default"]

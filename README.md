@@ -59,9 +59,10 @@ the Windows filesystem. Copying the Windows-staged directory cannot preserve the
 For these archives, installed package assets receive execute permission so wheels
 that contain helper executables remain usable; their read/write permissions do not
 change. Runtime files retain their original Unix permissions.
-When Unix archive names differ only by case, Windows staging uses distinct
-backing names. The generated archive and `SHA256SUMS` retain the original target
-paths and all file contents. Use the archive when delivering these Unix targets.
+When Unix archive names differ only by case, staging on a case-insensitive volume
+uses distinct backing names, including on default macOS volumes. The generated
+archive and `SHA256SUMS` retain the original target paths and all file contents.
+Use the archive when delivering these Unix targets.
 
 ## Verify and support generated applications
 
@@ -142,7 +143,7 @@ jac fmt --check src scripts tests ui
 jac check src scripts tests ui --lint
 jac check src scripts tests ui
 jac run scripts/build.jac
-jac run scripts/test.jac --native-libs .build/native/linux-x86_64/portable-libs
+jac test
 dist/bundlr-linux-x86_64/bundlr --diagnose
 jac run scripts/smoke.jac --runtime dist/bundlr-linux-x86_64 --browser
 .build/tests/acceptance-test builder dist/bundlr-linux-x86_64/bundlr .build/acceptance
@@ -184,7 +185,20 @@ Tests compile to native executables to exercise the release ABI, filesystem,
 archives, processes, HTTP parser and state machine. `scripts/smoke.jac` also checks
 uv cache repair, invalid tool rejection and live loopback controls. `--browser`
 requires Chrome and uses Jac's browser tooling for validation, cancellation and a
-real packaging flow. Hosted Jac tests are not used for the native FFI boundary.
+real packaging flow. `jac test` discovers a hosted runner in `tests/runner/` that
+invokes `scripts/test.jac`; application contracts still run in native executables.
+The runner uses the pinned bundle from `.build/native/HOST/portable-libs`, prepared
+by `scripts/build.jac`. Set `BUNDLR_TEST_NATIVE_LIBS` for another bundle location
+and `BUNDLR_TEST_TARGET` for a cross-compilation target. CI uses these overrides.
+The explicit helper remains available:
+
+```sh
+jac run scripts/test.jac --native-libs .build/native/linux-x86_64/portable-libs
+```
+
+Do not pass the native contract programs directly to `jac test`: Jac 0.39.1's
+hosted loader aborts while importing their native FFI declarations. The dedicated
+runner compiles them through the same native path as the release.
 
 GitHub Actions checks source, builds pinned dependencies and portable releases for
 four hosts, runs target-host contract tests and Linux-to-target Black acceptance,

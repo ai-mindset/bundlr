@@ -195,7 +195,10 @@ jobs:
       - name: Build release and enforce both 50 MiB limits
         run: jac run scripts/build.jac --target ${{ matrix.target }} --native-libs .build/portable-libs
       - name: Compile and run native contract tests
-        run: jac run scripts/test.jac --target ${{ matrix.target }} --native-libs .build/portable-libs
+        env:
+          BUNDLR_TEST_TARGET: ${{ matrix.target }}
+          BUNDLR_TEST_NATIVE_LIBS: .build/portable-libs
+        run: jac test
       - name: Save successful Jac compilation before browser acceptance
         if: steps.jac-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
