@@ -39,7 +39,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           tar -xzf release/bundlr-${{ inputs.target }}.tar.gz
-          mkdir tests applications
+          mkdir -p tests applications
           tar -xzf test-download/tests-${{ inputs.target }}.tar.gz -C tests
           tar -xzf app-download/Black-${{ inputs.target }}.tar.gz -C applications
           ./bundlr-${{ inputs.target }}/bundlr --diagnose
@@ -63,7 +63,7 @@ jobs:
             }
           }
           Expand-Archive release/bundlr-windows-x86_64.zip .
-          New-Item -ItemType Directory tests, applications | Out-Null
+          New-Item -ItemType Directory -Force tests, applications | Out-Null
           Invoke-BundlrNative tar @('-xzf', 'test-download/tests-windows-x86_64.tar.gz', '-C', 'tests')
           Expand-Archive app-download/Black-windows-x86_64.zip applications
           Invoke-BundlrNative ./bundlr-windows-x86_64/bundlr.exe @('--diagnose')
