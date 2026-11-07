@@ -86,8 +86,25 @@ def check_processes(fixture: str) {
     events = QuietEvents();
     child = start_child(fixture, ["stream"], events, capture=True);
     pump(child);
-    assert child.output == "out\n" * 32;
-    assert events.errors == "err\n" * 32;
+    assert child.code == 0;
+    assert child.output == "out\n" * 32 , "Captured stdout: " + repr(child.output);
+    assert events.errors == "err\n" * 32 , "Captured stderr: " + repr(events.errors);
+    # Check raw LF, CRLF and lone CR through both direct and relayed pipes.
+    # Windows start_child also inserts the production Job Object child runner.
+    for mode in ["newlines", "relay"] {
+        for contained in [False, True] {
+            events = QuietEvents();
+            child = start_child(
+                fixture, [mode], events, capture=True, contain_tree=contained
+            );
+            pump(child);
+            assert child.code == 0;
+            assert child.output == "out\ncrlf\r\ncr\rend" , "Captured stdout: "
+                + repr(child.output);
+            assert events.errors == "err\ncrlf\r\ncr\rend" , "Captured stderr: "
+                + repr(events.errors);
+        }
+    }
     child = start_child(
         fixture, ["environment"], events, {"BUNDLR_TEST_VALUE": "spaces = intact"}, True
     );

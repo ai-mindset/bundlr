@@ -1,6 +1,12 @@
 """Argument-array subprocesses with independent, concurrently drained output pipes."""
 import sys;
-import from src.platform.files { native_path, parent_path, join_path, stat_path }
+import from src.platform.files {
+    native_path,
+    parent_path,
+    join_path,
+    stat_path,
+    write_chunk
+}
 import from src.platform.process_jobs { ProcessJob, create_process_job }
 import from src.platform.ffi_uv {
     Buffer,
@@ -29,12 +35,14 @@ import from src.platform.ffi_uv {
 }
 
 obj:pub ProcessEvents {
+    # Preserve decoded pipe text on Windows as well as Unix. CRT text writes
+    # would expand LF to CRLF again; synchronous libuv writes need no flush.
     def stdout(text: str) {
-        sys.stdout.write(text);
+        write_chunk(1, text.encode("utf-8"));
     }
 
     def stderr(text: str) {
-        sys.stderr.write(text);
+        write_chunk(2, text.encode("utf-8"));
     }
 }
 
