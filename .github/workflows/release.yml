@@ -35,9 +35,34 @@ jobs:
       - run: jac check src scripts tests ui --lint
       - run: jac check src scripts tests ui
       - run: jac run scripts/build_ui.jac .build/ui
+      - name: Compile Windows compiler acceptance
+        run: jac build --native tests/compiler_probe.jac --target-triple x86_64-pc-windows-msvc -o .build/windows-compiler-probe.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-compiler-probe
+          path: .build/windows-compiler-probe.exe
+          if-no-files-found: error
+
+  windows-compiler-acceptance:
+    needs: verify
+    runs-on: windows-2022
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-compiler-probe
+          path: compiler-probe
+      - name: Run compiler acceptance before native dependency builds
+        shell: pwsh
+        run: |
+          Write-Host "Running the Windows compiler runtime acceptance"
+          & ./compiler-probe/windows-compiler-probe.exe
+          $compilerExitCode = $LASTEXITCODE
+          if ($compilerExitCode -ne 0) {
+            throw ("Windows compiler runtime failed with exit code {0} (0x{0:X8})" -f $compilerExitCode)
+          }
 
   native-dependencies:
-    needs: verify
+    needs: windows-compiler-acceptance
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +82,15 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+      - name: Restore pinned native bundle
+        id: native-cache
+        uses: actions/cache@v4
+        with:
+          path: native-${{ matrix.target }}.tar.gz
+          # Bump v1 if the native build command below changes its configuration.
+          key: native-v1-${{ matrix.runner }}-${{ matrix.target }}-${{ matrix.triplet }}-${{ hashFiles('build-lock.json', 'vcpkg.json', 'native/**', 'scripts/triplets/**') }}
       - uses: actions/checkout@v6
+        if: steps.native-cache.outputs.cache-hit != 'true'
         with:
           repository: microsoft/vcpkg
           ref: ${{ env.VCPKG_BASELINE }}
@@ -65,18 +98,19 @@ jobs:
           # Version overrides resolve historical port trees, including llhttp 9.2.1.
           fetch-depth: 0
       - name: Install Linux build tools
-        if: runner.os == 'Linux'
+        if: steps.native-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build patchelf autoconf automake libtool
       - uses: ilammy/msvc-dev-cmd@v1
-        if: runner.os == 'Windows'
+        if: steps.native-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
       - name: Bootstrap vcpkg on Unix
-        if: runner.os != 'Windows'
+        if: steps.native-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
         run: sh .build/vcpkg/bootstrap-vcpkg.sh -disableMetrics
       - name: Bootstrap vcpkg on Windows
-        if: runner.os == 'Windows'
+        if: steps.native-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
         shell: cmd
         run: .build\vcpkg\bootstrap-vcpkg.bat -disableMetrics
       - name: Build complete pinned native dependency bundle
+        if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           cmake -S native -B .build/native -DCMAKE_BUILD_TYPE=Release \
@@ -89,10 +123,13 @@ jobs:
         with:
           name: native-${{ matrix.target }}
           path: native-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
           compression-level: 0
 
   build:
     needs: native-dependencies
+    env:
+      JAC_CACHE_HOME: ${{ github.workspace }}/.build/jac-cache
     strategy:
       fail-fast: false
       matrix:
@@ -129,10 +166,27 @@ jobs:
         env:
           BUNDLR_RELEASE_TAG: ${{ github.ref_name }}
         run: jac run scripts/stamp_version.jac
+      - name: Restore Jac compilation cache
+        id: jac-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.JAC_CACHE_HOME }}/jir
+            .jac/cache
+          key: jac-jir-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ env.JAC_VERSION }}-${{ hashFiles('jac.toml', 'build-lock.json', 'src/**', 'scripts/**', 'tests/**', 'ui/**') }}
+          restore-keys: jac-jir-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ env.JAC_VERSION }}-
       - name: Build release and enforce both 50 MiB limits
         run: jac run scripts/build.jac --target ${{ matrix.target }} --native-libs .build/portable-libs
       - name: Compile and run native contract tests
         run: jac run scripts/test.jac --target ${{ matrix.target }} --native-libs .build/portable-libs
+      - name: Save successful Jac compilation before browser acceptance
+        if: steps.jac-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.JAC_CACHE_HOME }}/jir
+            .jac/cache
+          key: ${{ steps.jac-cache.outputs.cache-primary-key }}
       - name: Check browser UI and package real applications on Linux
         if: matrix.target == 'linux-x86_64'
         run: |
@@ -225,18 +279,22 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          function Invoke-BundlrNative([string]$Executable, [string[]]$NativeArguments) {
+            Write-Host "Running $Executable $($NativeArguments -join ' ')"
+            & $Executable @NativeArguments
+            $bundlrExitCode = $LASTEXITCODE
+            if ($bundlrExitCode -ne 0) {
+              throw ("{0} failed with exit code {1} (0x{1:X8})" -f $Executable, $bundlrExitCode)
+            }
+          }
           Expand-Archive release/bundlr-windows-x86_64.zip .
           New-Item -ItemType Directory tests, applications | Out-Null
-          tar -xzf test-download/tests-windows-x86_64.tar.gz -C tests
-          tar -xzf app-download/applications.tar.gz -C applications
-          & ./bundlr-windows-x86_64/bundlr.exe --diagnose
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ./tests/native-test.exe $env:RUNNER_TEMP
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ./applications/Black-windows-x86_64/Black.exe --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ./tests/acceptance-test.exe all ./bundlr-windows-x86_64/bundlr.exe .build/acceptance
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Invoke-BundlrNative tar @('-xzf', 'test-download/tests-windows-x86_64.tar.gz', '-C', 'tests')
+          Invoke-BundlrNative tar @('-xzf', 'app-download/applications.tar.gz', '-C', 'applications')
+          Invoke-BundlrNative ./bundlr-windows-x86_64/bundlr.exe @('--diagnose')
+          Invoke-BundlrNative ./tests/native-test.exe @($env:RUNNER_TEMP)
+          Invoke-BundlrNative ./applications/Black-windows-x86_64/Black.exe @('--version')
+          Invoke-BundlrNative ./tests/acceptance-test.exe @('all', './bundlr-windows-x86_64/bundlr.exe', '.build/acceptance')
       - uses: actions/upload-artifact@v4
         if: matrix.target == 'windows-x86_64'
         with:
@@ -280,7 +338,7 @@ jobs:
   production-ready:
     name: Production readiness (all four hosts)
     if: always()
-    needs: [verify, native-dependencies, build, smoke, windows-builder-acceptance]
+    needs: [verify, windows-compiler-acceptance, native-dependencies, build, smoke, windows-builder-acceptance]
     runs-on: ubuntu-22.04
     steps:
       - name: Require every production build and acceptance matrix to succeed

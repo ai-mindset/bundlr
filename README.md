@@ -172,6 +172,11 @@ real packaging flow. Hosted Jac tests are not used for the native FFI boundary.
 GitHub Actions checks source, builds pinned dependencies and portable releases for
 four hosts, runs target-host contract tests and Linux-to-target Black acceptance,
 and publishes archives/checksums/size reports for `v*` tags only after smoke tests.
+CI reuses native dependency bundles when their target, triplet, runner and pinned
+build inputs match. Jac compilation state is cached separately; every run still
+builds releases and executes all acceptance checks. A standalone Windows compiler
+runtime test runs before native dependencies are built, so compiler startup
+failures stop the workflow before the expensive build phase.
 Every host must also package and run pinned Black and a Git fixture through the
 released CLI. Git tests use committed local repositories and a test-scoped HTTPS
 URL rewrite; they exercise Git, PEP 517, target dependency markers and rejection
