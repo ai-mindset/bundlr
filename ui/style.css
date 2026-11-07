@@ -1,0 +1,25 @@
+:root { color-scheme: light dark; font: 15px system-ui, sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; background: Canvas; color: CanvasText; }
+main { max-width: 720px; margin: auto; padding: 28px; }
+h1 { margin: 0; font-size: 28px; }
+#subtitle, #status { color: GrayText; }
+label { display: block; margin: 14px 0 6px; font-weight: 600; }
+input, select, button { font: inherit; }
+input, select { width: 100%; padding: 10px 12px; border: 1px solid GrayText; border-radius: 6px; background: Field; color: FieldText; }
+.row, .targets { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+fieldset { margin-top: 14px; padding: 10px 12px; border: 1px solid GrayText; border-radius: 6px; }
+legend { font-weight: 600; }
+.targets { gap: 8px; }
+.targets label { display: flex; gap: 8px; align-items: center; margin: 0; font-weight: 400; }
+.targets input { width: auto; }
+.actions { display: flex; gap: 10px; margin: 18px 0; }
+button { padding: 9px 18px; border: 0; border-radius: 6px; cursor: pointer; }
+#package { background: #2563eb; color: white; }
+#cancel { background: #dc2626; color: white; }
+#quit { margin-left: auto; }
+button:disabled { opacity: .5; cursor: default; }
+#status { min-height: 22px; }
+pre { min-height: 160px; max-height: 240px; overflow: auto; padding: 12px; border-radius: 6px; background: #111827; color: #e5e7eb; white-space: pre-wrap; }
+.stderr { color: #fca5a5; }
+@media (max-width: 520px) { .row, .targets { grid-template-columns: 1fr; } }

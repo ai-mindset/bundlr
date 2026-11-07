@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bundlr</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <h1>Bundlr</h1>
+    <p id="subtitle">Package a Python application.</p>
+    <form id="form">
+      <label for="source">Pinned PyPI requirement or HTTPS Git URL</label>
+      <input id="source" required placeholder="example-app==1.0.0">
+      <div class="row">
+        <div><label for="applicationName">Application name</label><input id="applicationName" placeholder="Auto-detect"></div>
+        <div><label for="command">Application entry point</label><input id="command" placeholder="Auto-detect"></div>
+      </div>
+      <div class="row">
+        <div><label for="applicationKind">Application kind</label><select id="applicationKind"><option value="auto">Auto-detect</option><option value="windowed">Windowed</option><option value="console">Console</option></select></div>
+        <div><label for="python">Python version</label><input id="python" value="3.12"></div>
+      </div>
+      <label for="outputDirectory">Output directory</label><input id="outputDirectory" value="dist">
+      <fieldset>
+        <legend>Target platforms</legend>
+        <div class="targets">
+          <label><input type="checkbox" id="target-linux-x86_64" name="target" value="linux-x86_64">Linux x64</label>
+          <label><input type="checkbox" id="target-windows-x86_64" name="target" value="windows-x86_64">Windows x64</label>
+          <label><input type="checkbox" id="target-macos-arm64" name="target" value="macos-arm64">macOS Apple Silicon</label>
+          <label><input type="checkbox" id="target-macos-x86_64" name="target" value="macos-x86_64">macOS Intel</label>
+        </div>
+      </fieldset>
+      <div class="actions"><button id="package" type="submit">Package</button><button id="cancel" type="button" disabled>Cancel</button><button id="quit" type="button">Quit Bundlr</button></div>
+    </form>
+    <div id="status" role="status"></div><pre id="output" aria-label="Packaging output"></pre>
+  </main>
+  <script id="config" type="application/json">{{CONFIG}}</script>
+  <script type="module" src="/ui.js"></script>
+</body>
+</html>

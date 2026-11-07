@@ -1,0 +1,14 @@
+{
+  "name": "bundlr-native",
+  "version-string": "0.2.0-dev",
+  "builtin-baseline": "9eec002df1cd109f8f104cd966a763daf9751489",
+  "dependencies": [
+    "libuv",
+    { "name": "curl", "default-features": false, "features": ["ssl", "c-ares"] },
+    { "name": "libarchive", "default-features": false },
+    "llhttp"
+  ],
+  "overrides": [
+    { "name": "llhttp", "version": "9.2.1" }
+  ]
+}

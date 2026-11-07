@@ -1,0 +1,105 @@
+name: Run native platform acceptance
+'on':
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      runner:
+        required: true
+        type: string
+permissions:
+  contents: read
+env:
+  BUNDLR_PYTHON_CACHE_DIRECTORY: ${{ github.workspace }}/.build/python-cache
+jobs:
+  smoke:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cache checksum-verified Python archives
+        uses: actions/cache@v5
+        with:
+          path: .build/python-cache
+          key: python-v1-${{ runner.os }}-${{ inputs.target }}-${{ hashFiles('src/core/distribution.jac', 'src/domain/request.jac') }}
+          restore-keys: python-v1-${{ runner.os }}-${{ inputs.target }}-
+      - uses: actions/download-artifact@v7
+        with:
+          name: bundlr-${{ inputs.target }}
+          path: release
+      - uses: actions/download-artifact@v7
+        with:
+          name: tests-${{ inputs.target }}
+          path: test-download
+      - uses: actions/download-artifact@v7
+        with:
+          name: application-fixtures-${{ inputs.target }}
+          path: app-download
+      - name: Smoke test Unix release and cross-built Python application
+        if: runner.os != 'Windows'
+        run: |
+          tar -xzf release/bundlr-${{ inputs.target }}.tar.gz
+          mkdir -p tests applications
+          tar -xzf test-download/tests-${{ inputs.target }}.tar.gz -C tests
+          tar -xzf app-download/Black-${{ inputs.target }}.tar.gz -C applications
+          ./bundlr-${{ inputs.target }}/bundlr --diagnose
+          ./tests/native-test "$RUNNER_TEMP"
+          if [ "${{ inputs.target }}" = "linux-x86_64" ]; then
+            ./applications/Black-linux-x86_64/Black --version
+          else
+            ./applications/Black-${{ inputs.target }}.app/Contents/MacOS/Black --version
+          fi
+          ./tests/acceptance-test builder ./bundlr-${{ inputs.target }}/bundlr .build/acceptance
+      - name: Smoke test Windows without Jac, Bun or builder Python
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          function Invoke-BundlrNative([string]$Executable, [string[]]$NativeArguments) {
+            Write-Host "Running $Executable $($NativeArguments -join ' ')"
+            & $Executable @NativeArguments
+            $bundlrExitCode = $LASTEXITCODE
+            if ($bundlrExitCode -ne 0) {
+              throw ("{0} failed with exit code {1} (0x{1:X8})" -f $Executable, $bundlrExitCode)
+            }
+          }
+          Expand-Archive release/bundlr-windows-x86_64.zip .
+          New-Item -ItemType Directory -Force tests, applications | Out-Null
+          Invoke-BundlrNative tar @('-xzf', 'test-download/tests-windows-x86_64.tar.gz', '-C', 'tests')
+          Expand-Archive app-download/Black-windows-x86_64.zip applications
+          Invoke-BundlrNative ./bundlr-windows-x86_64/bundlr.exe @('--diagnose')
+          Invoke-BundlrNative ./tests/native-test.exe @($env:RUNNER_TEMP)
+          Invoke-BundlrNative ./applications/Black-windows-x86_64/Black.exe @('--version')
+          Invoke-BundlrNative ./tests/acceptance-test.exe @('all', './bundlr-windows-x86_64/bundlr.exe', '.build/acceptance')
+      - uses: actions/upload-artifact@v6
+        with:
+          name: windows-built-linux-x86_64
+          path: |-
+            .build/acceptance/Black-linux-x86_64.tar.gz
+            .build/acceptance/Black-linux-x86_64.tar.gz.sha256
+            .build/acceptance/GitDemo-linux-x86_64.tar.gz
+            .build/acceptance/GitDemo-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+        if: inputs.target == 'windows-x86_64'
+      - uses: actions/upload-artifact@v6
+        with:
+          name: windows-built-macos-arm64
+          path: |-
+            .build/acceptance/Black-macos-arm64.tar.gz
+            .build/acceptance/Black-macos-arm64.tar.gz.sha256
+            .build/acceptance/GitDemo-macos-arm64.tar.gz
+            .build/acceptance/GitDemo-macos-arm64.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+        if: inputs.target == 'windows-x86_64'
+      - uses: actions/upload-artifact@v6
+        with:
+          name: windows-built-macos-x86_64
+          path: |-
+            .build/acceptance/Black-macos-x86_64.tar.gz
+            .build/acceptance/Black-macos-x86_64.tar.gz.sha256
+            .build/acceptance/GitDemo-macos-x86_64.tar.gz
+            .build/acceptance/GitDemo-macos-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+        if: inputs.target == 'windows-x86_64'

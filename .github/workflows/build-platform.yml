@@ -1,0 +1,165 @@
+name: Build one portable platform
+'on':
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      triplet:
+        required: true
+        type: string
+      dependency-runner:
+        required: true
+        type: string
+      build-runner:
+        required: true
+        type: string
+      jac-version:
+        required: true
+        type: string
+      vcpkg-baseline:
+        required: true
+        type: string
+permissions:
+  contents: read
+env:
+  JAC_VERSION: ${{ inputs.jac-version }}
+  JAC_CACHE_HOME: ${{ github.workspace }}/.build/jac-cache
+  VCPKG_BASELINE: ${{ inputs.vcpkg-baseline }}
+jobs:
+  native-dependencies:
+    runs-on: ${{ inputs.dependency-runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Restore pinned native bundle
+        id: native-cache
+        uses: actions/cache@v5
+        with:
+          path: native-${{ inputs.target }}.tar.gz
+          # Only native build inputs and the checked baseline affect this bundle.
+          key: native-v2-${{ inputs.dependency-runner }}-${{ inputs.target }}-${{ inputs.triplet }}-${{ env.VCPKG_BASELINE }}-${{ hashFiles('vcpkg.json', 'native/**', 'scripts/triplets/**') }}
+      - name: Reuse an identical bundle from the previous cache key
+        id: legacy-native-cache
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: native-${{ inputs.target }}.tar.gz
+          key: native-v1-${{ inputs.dependency-runner }}-${{ inputs.target }}-${{ inputs.triplet }}-${{ hashFiles('build-lock.json', 'vcpkg.json', 'native/**', 'scripts/triplets/**') }}
+      - uses: actions/checkout@v6
+        if: steps.native-cache.outputs.cache-hit != 'true' && steps.legacy-native-cache.outputs.cache-hit != 'true'
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_BASELINE }}
+          path: .build/vcpkg
+          fetch-depth: 0
+      - name: Install Linux build tools
+        if: steps.native-cache.outputs.cache-hit != 'true' && steps.legacy-native-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build patchelf autoconf automake libtool
+      - name: Configure Microsoft x64 compiler environment
+        if: steps.native-cache.outputs.cache-hit != 'true' && steps.legacy-native-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bundlrEnvBefore = @{}
+          Get-ChildItem Env: | ForEach-Object { $bundlrEnvBefore[$_.Name] = $_.Value }
+          $bundlrVsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $bundlrVsRoot = & $bundlrVsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $bundlrVsRoot) {
+            throw 'Could not locate the installed Microsoft x64 compiler tools.'
+          }
+          $bundlrDevShell = Join-Path $bundlrVsRoot 'Common7/Tools/Launch-VsDevShell.ps1'
+          & $bundlrDevShell -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          Get-Command cl.exe, link.exe | Select-Object Name, Source
+          Get-ChildItem Env: | Where-Object { $bundlrEnvBefore[$_.Name] -cne $_.Value } | ForEach-Object {
+            $bundlrDelimiter = [guid]::NewGuid().ToString('N')
+            "$($_.Name)<<$bundlrDelimiter`n$($_.Value)`n$bundlrDelimiter" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+      - name: Bootstrap vcpkg on Unix
+        if: steps.native-cache.outputs.cache-hit != 'true' && steps.legacy-native-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        run: sh .build/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - name: Bootstrap vcpkg on Windows
+        if: steps.native-cache.outputs.cache-hit != 'true' && steps.legacy-native-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: cmd
+        run: .build\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      - name: Build complete pinned native dependency bundle
+        if: steps.native-cache.outputs.cache-hit != 'true' && steps.legacy-native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          cmake -S native -B .build/native -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/.build/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_DIR="$PWD" -DVCPKG_OVERLAY_TRIPLETS="$PWD/scripts/triplets" \
+            -DVCPKG_TARGET_TRIPLET=${{ inputs.triplet }}
+          cmake --build .build/native --config Release
+          tar -czf native-${{ inputs.target }}.tar.gz -C .build/native/portable-libs .
+      - uses: actions/upload-artifact@v6
+        with:
+          name: native-${{ inputs.target }}
+          path: native-${{ inputs.target }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+  build:
+    needs: native-dependencies
+    runs-on: ${{ inputs.build-runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Jac
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o /tmp/install-jac.sh
+          bash /tmp/install-jac.sh --version "$JAC_VERSION"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v7
+        with:
+          name: native-${{ inputs.target }}
+          path: .build/download
+      - name: Restore native libraries with relative symlinks
+        run: |
+          mkdir -p .build/portable-libs
+          tar -xzf .build/download/native-${{ inputs.target }}.tar.gz -C .build/portable-libs
+      - name: Stamp release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          BUNDLR_RELEASE_TAG: ${{ github.ref_name }}
+        run: jac run scripts/stamp_version.jac
+      - name: Restore Jac compilation cache
+        id: jac-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ${{ env.JAC_CACHE_HOME }}/jir
+            .jac/cache
+          key: jac-jir-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ env.JAC_VERSION }}-${{ hashFiles('jac.toml', 'build-lock.json', 'src/**', 'scripts/**', 'tests/**', 'ui/**') }}
+          restore-keys: jac-jir-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ env.JAC_VERSION }}-
+      - name: Build release and enforce both 50 MiB limits
+        run: jac run scripts/build.jac --target ${{ inputs.target }} --native-libs .build/portable-libs
+      - name: Compile and run native contract tests
+        env:
+          BUNDLR_TEST_TARGET: ${{ inputs.target }}
+          BUNDLR_TEST_NATIVE_LIBS: .build/portable-libs
+        run: jac test
+      - name: Save successful Jac compilation
+        if: steps.jac-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ${{ env.JAC_CACHE_HOME }}/jir
+            .jac/cache
+          key: ${{ steps.jac-cache.outputs.cache-primary-key }}
+      - name: Stage native tests for target-host smoke tests
+        run: tar -czf tests-${{ inputs.target }}.tar.gz -C .build/tests .
+      - uses: actions/upload-artifact@v6
+        with:
+          name: tests-${{ inputs.target }}
+          path: tests-${{ inputs.target }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v6
+        with:
+          name: bundlr-${{ inputs.target }}
+          path: |
+            dist/bundlr-*.tar.gz
+            dist/bundlr-*.zip
+            dist/bundlr-*.sha256
+            dist/bundlr-*.size.json
+          if-no-files-found: error
+          compression-level: 0

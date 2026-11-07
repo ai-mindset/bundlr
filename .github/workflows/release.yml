@@ -1,124 +1,301 @@
-name: Verify and release Bundlr
-
-on:
+name: Native Jac release
+'on':
   push:
     branches:
       - main
     tags:
-      - "v*"
-  pull_request:
-  workflow_dispatch:
-
-# Cancel any in-progress run for the same tag (e.g. on a re-push)
+      - v*
+  pull_request: null
+  workflow_dispatch: null
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 env:
-  BUN_VERSION: 1.4.3
-
+  JAC_VERSION: 0.39.1
+  JAC_CACHE_HOME: ${{ github.workspace }}/.build/jac-cache
+  VCPKG_BASELINE: 9eec002df1cd109f8f104cd966a763daf9751489
 jobs:
   verify:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - run: bun ci
-      - run: bun run lint:format
-      - run: bun run typecheck
-      - run: bun test
-
-  build:
-    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: verify
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            uv_target: x86_64-unknown-linux-gnu
-            bun_target: bun-linux-x64
-            name: linux-x86_64
-            cli: bundlr-cli-linux-x86_64
-          - runner: windows-2022
-            uv_target: x86_64-pc-windows-msvc
-            bun_target: bun-windows-x64
-            name: windows-x86_64
-            cli: bundlr-cli-windows-x86_64.exe
-          - runner: macos-15
-            uv_target: aarch64-apple-darwin
-            bun_target: bun-darwin-arm64
-            name: macos-arm64
-            cli: bundlr-cli-macos-arm64
-          - runner: macos-15-intel
-            uv_target: x86_64-apple-darwin
-            bun_target: bun-darwin-x64
-            name: macos-x86_64
-            cli: bundlr-cli-macos-x86_64
-    name: Build ${{ matrix.name }}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - run: bun ci
-
-      - name: Stamp release version
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Read and check pinned compiler and native baseline
+        id: pins
+        run: |
+          test "$(jq -r .jacVersion build-lock.json)" = "$JAC_VERSION"
+          test "$(jq -r .vcpkgBaseline build-lock.json)" = "$VCPKG_BASELINE"
+          test "$(jq -r '.["builtin-baseline"]' vcpkg.json)" = "$VCPKG_BASELINE"
+          test "$(jq -r .llhttpVersion build-lock.json)" = "$(jq -r '.overrides[] | select(.name == "llhttp") | .version' vcpkg.json)"
+          jq -r '"jac-version=\(.jacVersion)\nvcpkg-baseline=\(.vcpkgBaseline)"' build-lock.json >> "$GITHUB_OUTPUT"
+      - name: Install pinned Jac
         env:
-          BUNDLR_RELEASE_TAG: ${{ github.ref_name }}
-        run: bun scripts/stamp_version.ts
-
-      - name: Prepare checksum-verified uv
-        run: bun run prepare:uv ${{ matrix.uv_target }}
-
-      - name: Compile Bundlr CLI
-        run: >-
-          bun build --compile
-          --target=${{ matrix.bun_target }}
-          --asset vendor/uv
-          src/main.ts
-          --outfile dist/${{ matrix.cli }}
-
-      - name: Diagnose CLI on Unix
-        if: runner.os != 'Windows'
-        run: ./dist/${{ matrix.cli }} --diagnose
-
-      - name: Diagnose CLI on Windows
-        if: runner.os == 'Windows'
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o /tmp/install-jac.sh
+          bash /tmp/install-jac.sh --version "$JAC_VERSION"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: jac run scripts/prepare_uv.jac --target linux-x86_64
+      - run: jac fmt --check src scripts tests ui
+      - run: jac check src scripts tests ui --lint
+      - run: jac check src scripts tests ui
+      - run: jac run scripts/build_ui.jac .build/ui
+      - name: Compile Windows compiler acceptance
+        run: |
+          jac run scripts/prepare_jac.jac --target windows-x86_64
+          jac build --native tests/compiler_probe.jac --target-triple x86_64-pc-windows-msvc -o .build/windows-compiler-probe.exe
+      - uses: actions/upload-artifact@v6
+        with:
+          name: windows-compiler-probe
+          path: .build/windows-compiler-probe.exe
+          if-no-files-found: error
+    outputs:
+      jac-version: ${{ steps.pins.outputs.jac-version }}
+      vcpkg-baseline: ${{ steps.pins.outputs.vcpkg-baseline }}
+  windows-compiler-acceptance:
+    needs: verify
+    runs-on: windows-2022
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: windows-compiler-probe
+          path: compiler-probe
+      - name: Run compiler acceptance before native dependency builds
         shell: pwsh
         run: |
-          & ".\dist\${{ matrix.cli }}" --diagnose
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - uses: actions/upload-artifact@v4
+          Write-Host "Running the Windows compiler runtime acceptance"
+          & ./compiler-probe/windows-compiler-probe.exe
+          $compilerExitCode = $LASTEXITCODE
+          if ($compilerExitCode -ne 0) {
+            throw ("Windows compiler runtime failed with exit code {0} (0x{0:X8})" -f $compilerExitCode)
+          }
+  # Keep per-target dependencies explicit so a matrix cannot add global barriers.
+  build-linux:
+    needs:
+      - verify
+      - windows-compiler-acceptance
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      target: linux-x86_64
+      triplet: bundlr-x64-linux
+      dependency-runner: ubuntu-22.04
+      build-runner: ubuntu-22.04
+      jac-version: ${{ needs.verify.outputs.jac-version }}
+      vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
+  build-windows:
+    needs:
+      - verify
+      - windows-compiler-acceptance
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      target: windows-x86_64
+      triplet: bundlr-x64-windows
+      dependency-runner: windows-2022
+      build-runner: ubuntu-22.04
+      jac-version: ${{ needs.verify.outputs.jac-version }}
+      vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
+  build-macos-arm64:
+    needs:
+      - verify
+      - windows-compiler-acceptance
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      target: macos-arm64
+      triplet: bundlr-arm64-osx
+      dependency-runner: macos-15
+      build-runner: macos-15
+      jac-version: ${{ needs.verify.outputs.jac-version }}
+      vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
+  build-macos-x86_64:
+    needs:
+      - verify
+      - windows-compiler-acceptance
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      target: macos-x86_64
+      triplet: bundlr-x64-osx
+      dependency-runner: macos-15-intel
+      build-runner: macos-15
+      jac-version: ${{ needs.verify.outputs.jac-version }}
+      vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
+  browser:
+    needs: build-linux
+    runs-on: ubuntu-22.04
+    env:
+      BUNDLR_PYTHON_CACHE_DIRECTORY: ${{ github.workspace }}/.build/python-cache
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Jac
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o /tmp/install-jac.sh
+          bash /tmp/install-jac.sh --version "$JAC_VERSION"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Cache checksum-verified Python archives
+        uses: actions/cache@v5
         with:
-          name: bundlr-${{ matrix.name }}
-          path: |
-            dist/${{ matrix.cli }}
-          if-no-files-found: error
-          compression-level: 0
-
+          path: .build/python-cache
+          key: python-v1-${{ runner.os }}-linux-x86_64-${{ hashFiles('src/core/distribution.jac', 'src/domain/request.jac') }}
+          restore-keys: python-v1-${{ runner.os }}-linux-x86_64-
+      - uses: actions/download-artifact@v7
+        with:
+          name: bundlr-linux-x86_64
+          path: release
+      - name: Extract Linux release
+        run: |
+          mkdir -p dist
+          tar -xzf release/bundlr-linux-x86_64.tar.gz -C dist
+      - name: Check browser UI, live packaging, cancellation and shutdown
+        run: |
+          BUNDLR_SMOKE_CHROME="$(command -v google-chrome)"
+          export BUNDLR_SMOKE_CHROME
+          export BUNDLR_SMOKE_CHROME_LOG="$RUNNER_TEMP/bundlr-chrome.log"
+          cat > "$RUNNER_TEMP/bundlr-chrome" <<'BROWSER'
+          #!/bin/sh
+          exec "$BUNDLR_SMOKE_CHROME" "$@" 2>>"$BUNDLR_SMOKE_CHROME_LOG"
+          BROWSER
+          chmod +x "$RUNNER_TEMP/bundlr-chrome"
+          export JACBROWSER_CHROME="$RUNNER_TEMP/bundlr-chrome"
+          if ! jac run scripts/smoke.jac --runtime dist/bundlr-linux-x86_64 --browser; then
+            if [ -f "$BUNDLR_SMOKE_CHROME_LOG" ]; then
+              cat "$BUNDLR_SMOKE_CHROME_LOG"
+            fi
+            exit 1
+          fi
+  linux-fixture-linux:
+    needs: build-linux
+    uses: ./.github/workflows/linux-fixture.yml
+    with:
+      target: linux-x86_64
+  smoke-linux:
+    needs:
+      - build-linux
+      - linux-fixture-linux
+    uses: ./.github/workflows/smoke-platform.yml
+    with:
+      target: linux-x86_64
+      runner: ubuntu-22.04
+  linux-fixture-windows:
+    needs: build-linux
+    uses: ./.github/workflows/linux-fixture.yml
+    with:
+      target: windows-x86_64
+  smoke-windows:
+    needs:
+      - build-windows
+      - linux-fixture-windows
+    uses: ./.github/workflows/smoke-platform.yml
+    with:
+      target: windows-x86_64
+      runner: windows-2022
+  linux-fixture-macos-arm64:
+    needs: build-linux
+    uses: ./.github/workflows/linux-fixture.yml
+    with:
+      target: macos-arm64
+  smoke-macos-arm64:
+    needs:
+      - build-macos-arm64
+      - linux-fixture-macos-arm64
+    uses: ./.github/workflows/smoke-platform.yml
+    with:
+      target: macos-arm64
+      runner: macos-15
+  linux-fixture-macos-x86_64:
+    needs: build-linux
+    uses: ./.github/workflows/linux-fixture.yml
+    with:
+      target: macos-x86_64
+  smoke-macos-x86_64:
+    needs:
+      - build-macos-x86_64
+      - linux-fixture-macos-x86_64
+    uses: ./.github/workflows/smoke-platform.yml
+    with:
+      target: macos-x86_64
+      runner: macos-15-intel
+  windows-recipient-linux:
+    needs:
+      - smoke-windows
+      - build-linux
+    uses: ./.github/workflows/windows-recipient.yml
+    with:
+      target: linux-x86_64
+      runner: ubuntu-22.04
+  windows-recipient-macos-arm64:
+    needs:
+      - smoke-windows
+      - build-macos-arm64
+    uses: ./.github/workflows/windows-recipient.yml
+    with:
+      target: macos-arm64
+      runner: macos-15
+  windows-recipient-macos-x86_64:
+    needs:
+      - smoke-windows
+      - build-macos-x86_64
+    uses: ./.github/workflows/windows-recipient.yml
+    with:
+      target: macos-x86_64
+      runner: macos-15-intel
+  production-ready:
+    name: Production readiness (all four hosts)
+    if: always()
+    needs:
+      - verify
+      - windows-compiler-acceptance
+      - build-linux
+      - build-windows
+      - build-macos-arm64
+      - build-macos-x86_64
+      - browser
+      - linux-fixture-linux
+      - smoke-linux
+      - linux-fixture-windows
+      - smoke-windows
+      - linux-fixture-macos-arm64
+      - smoke-macos-arm64
+      - linux-fixture-macos-x86_64
+      - smoke-macos-x86_64
+      - windows-recipient-linux
+      - windows-recipient-macos-arm64
+      - windows-recipient-macos-x86_64
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require every production build and acceptance matrix to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs:
+      - production-ready
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: bundlr-*
           path: release
           merge-multiple: true
-      - name: Publish GitHub release
+      - name: Publish portable archives, checksums and size reports
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/* --generate-notes --verify-tag
+        run: |
+          # A retry may follow a successful publish whose response was lost.
+          if is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)"; then
+            if [ "$is_draft" != false ]; then
+              echo "::error::Existing release is a draft; inspect it before retrying."
+              exit 1
+            fi
+            existing_assets="$(mktemp -d "$RUNNER_TEMP/bundlr-release-XXXXXXXX")"
+            gh release download "$GITHUB_REF_NAME" --dir "$existing_assets"
+            diff -qr -- release "$existing_assets"
+            echo "Existing release assets match this verified build."
+          else
+            gh release create "$GITHUB_REF_NAME" release/* --generate-notes --verify-tag
+          fi
