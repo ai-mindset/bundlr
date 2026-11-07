@@ -19,7 +19,7 @@ import from src.platform.files {
 }
 import from src.platform.processes { start_child, ProcessEvents }
 import from src.platform.ffi_uv { uv_default_loop, uv_run }
-import from src.platform.archives { Extractor }
+import from src.platform.archives { Extractor, ArchiveMetadata }
 
 glob GIT_SOURCE: str = "https://bundlr-acceptance.invalid/application.git",
      BLACK_VERSION: str = str(
@@ -223,13 +223,15 @@ def artifact_path(directory: str, name: str, target: str) -> str {
     );
 }
 
-def verify_archive(path: str, directory: str, name: str, target: str) {
+def verify_archive(
+    path: str, directory: str, name: str, target: str
+) -> ArchiveMetadata {
     digest = file_sha256(path);
     assert read_text(path + ".sha256").strip()
         == digest + "  " + path.replace("\\", "/").split("/")[-1];
     reader = unpack(path, directory);
     if target == "windows-x86_64" {
-        return;
+        return reader.metadata;
     }
     metadata = reader.metadata;
     application = launcher(directory, name, target);
@@ -251,9 +253,15 @@ def verify_archive(path: str, directory: str, name: str, target: str) {
             assert metadata.modes[member_path] & 64;
         }
     }
+    return metadata;
 }
 
-def verify_evidence(directory: str, target: str, source: str = "") {
+def verify_evidence(
+    directory: str,
+    target: str,
+    source: str = "",
+    metadata: ArchiveMetadata = ArchiveMetadata()
+) {
     resources = join_path(directory, "Contents/Resources")
         if target.startswith("macos-")
         else directory;
@@ -264,7 +272,8 @@ def verify_evidence(directory: str, target: str, source: str = "") {
     }
     for line in read_text(join_path(resources, "SHA256SUMS")).splitlines() {
         parts = line.split("  ", 1);
-        assert file_sha256(join_path(resources, parts[1])) == parts[0];
+        assert file_sha256(metadata.stored_path(join_path(resources, parts[1])))
+            == parts[0];
     }
     assert stat_path(join_path(resources, "THIRD_PARTY_LICENSES.txt")).is_file();
     if source != "" {
@@ -351,11 +360,12 @@ def accept(binary: str, output: str, all_targets: bool) {
             extension = ".zip" if selected == "windows-x86_64" else ".tar.gz";
             archive = join_path(output, name + "-" + selected + extension);
             extracted = join_path(output, "extracted-" + name + "-" + selected);
-            verify_archive(archive, extracted, name, selected);
+            metadata = verify_archive(archive, extracted, name, selected);
             verify_evidence(
                 artifact_path(extracted, name, selected),
                 selected,
-                source if name == "GitDemo" else ""
+                source if name == "GitDemo" else "",
+                metadata
             );
             if selected == target {
                 result = run(

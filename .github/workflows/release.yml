@@ -40,7 +40,7 @@ jobs:
         run: |
           jac run scripts/prepare_jac.jac --target windows-x86_64
           jac build --native tests/compiler_probe.jac --target-triple x86_64-pc-windows-msvc -o .build/windows-compiler-probe.exe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: windows-compiler-probe
           path: .build/windows-compiler-probe.exe
@@ -50,7 +50,7 @@ jobs:
     needs: verify
     runs-on: windows-2022
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: windows-compiler-probe
           path: compiler-probe
@@ -87,7 +87,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Restore pinned native bundle
         id: native-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: native-${{ matrix.target }}.tar.gz
           # Bump v1 if the native build command below changes its configuration.
@@ -103,8 +103,24 @@ jobs:
       - name: Install Linux build tools
         if: steps.native-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build patchelf autoconf automake libtool
-      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure Microsoft x64 compiler environment
         if: steps.native-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bundlrEnvBefore = @{}
+          Get-ChildItem Env: | ForEach-Object { $bundlrEnvBefore[$_.Name] = $_.Value }
+          $bundlrVsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $bundlrVsRoot = & $bundlrVsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $bundlrVsRoot) {
+            throw 'Could not locate the installed Microsoft x64 compiler tools.'
+          }
+          $bundlrDevShell = Join-Path $bundlrVsRoot 'Common7/Tools/Launch-VsDevShell.ps1'
+          & $bundlrDevShell -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          Get-Command cl.exe, link.exe | Select-Object Name, Source
+          Get-ChildItem Env: | Where-Object { $bundlrEnvBefore[$_.Name] -cne $_.Value } | ForEach-Object {
+            $bundlrDelimiter = [guid]::NewGuid().ToString('N')
+            "$($_.Name)<<$bundlrDelimiter`n$($_.Value)`n$bundlrDelimiter" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
       - name: Bootstrap vcpkg on Unix
         if: steps.native-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
         run: sh .build/vcpkg/bootstrap-vcpkg.sh -disableMetrics
@@ -122,7 +138,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
           cmake --build .build/native --config Release
           tar -czf native-${{ matrix.target }}.tar.gz -C .build/native/portable-libs .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: native-${{ matrix.target }}
           path: native-${{ matrix.target }}.tar.gz
@@ -154,7 +170,7 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o /tmp/install-jac.sh
           bash /tmp/install-jac.sh --version "$JAC_VERSION"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: native-${{ matrix.target }}
           path: .build/download
@@ -169,7 +185,7 @@ jobs:
         run: jac run scripts/stamp_version.jac
       - name: Restore Jac compilation cache
         id: jac-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             ${{ env.JAC_CACHE_HOME }}/jir
@@ -182,7 +198,7 @@ jobs:
         run: jac run scripts/test.jac --target ${{ matrix.target }} --native-libs .build/portable-libs
       - name: Save successful Jac compilation before browser acceptance
         if: steps.jac-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: |
             ${{ env.JAC_CACHE_HOME }}/jir
@@ -209,7 +225,7 @@ jobs:
           dist/bundlr-linux-x86_64/bundlr --name Black --command black --target all --output .build/applications black==26.5.1
           .build/applications/Black-linux-x86_64/Black --version
           tar -czf applications.tar.gz -C .build/applications .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: matrix.target == 'linux-x86_64'
         with:
           name: application-fixtures
@@ -217,12 +233,12 @@ jobs:
           compression-level: 0
       - name: Stage native tests for target-host smoke tests
         run: tar -czf tests-${{ matrix.target }}.tar.gz -C .build/tests .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: tests-${{ matrix.target }}
           path: tests-${{ matrix.target }}.tar.gz
           compression-level: 0
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: bundlr-${{ matrix.target }}
           path: |
@@ -249,15 +265,15 @@ jobs:
             target: macos-x86_64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: bundlr-${{ matrix.target }}
           path: release
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: tests-${{ matrix.target }}
           path: test-download
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: application-fixtures
           path: app-download
@@ -296,7 +312,7 @@ jobs:
           Invoke-BundlrNative ./tests/native-test.exe @($env:RUNNER_TEMP)
           Invoke-BundlrNative ./applications/Black-windows-x86_64/Black.exe @('--version')
           Invoke-BundlrNative ./tests/acceptance-test.exe @('all', './bundlr-windows-x86_64/bundlr.exe', '.build/acceptance')
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: matrix.target == 'windows-x86_64'
         with:
           name: windows-built-applications
@@ -322,11 +338,11 @@ jobs:
             target: macos-x86_64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: windows-built-applications
           path: applications
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: tests-${{ matrix.target }}
           path: test-download
@@ -354,7 +370,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: bundlr-*
           path: release

@@ -328,7 +328,9 @@ obj:pub BuildJob {
             }
             write_manifest(effective, self.resources, self.target, resolved_point);
             write_dependencies(self.resources, self.packages);
-            self.evidence = EvidenceTask(directory=self.resources);
+            self.evidence = EvidenceTask(
+                directory=self.resources, metadata=self.archive_metadata
+            );
             self.evidence.start();
             self.phase = "evidence";
             return;

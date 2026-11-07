@@ -17,7 +17,8 @@ import from src.core.metadata {
     application_entries,
     portable_git_wheel,
     wheel_requirements,
-    installed_entry_point
+    installed_entry_point,
+    EvidenceTask
 }
 import from src.core.launchers { resources_path, launcher_zip, create_launcher }
 import from src.platform.files {
@@ -515,6 +516,124 @@ def check_archive_metadata(base: str) {
     }
 }
 
+def check_archive_case_collisions(base: str) {
+    source = join_path(base, "case-source");
+    make_dirs(source);
+    metadata = ArchiveMetadata();
+    entries = [
+        ("a-upper", "share/terminfo/e/Eterm", "upper payload"),
+        ("b-lower", "share/terminfo/e/eterm", "different lower payload"),
+        ("directory-upper/item", "Lib/item", "upper directory"),
+        ("directory-lower/item", "lib/item", "lower directory"),
+        ("zzz-reserved", "share/terminfo/e/_bundlr_case_0", "original reserved name")
+    ];
+    for (stored, original, content) in entries {
+        path = join_path(source, stored);
+        make_dirs(parent_path(path));
+        write_text(path, content);
+        metadata.original_paths[path] = join_path(source, original);
+        metadata.modes[path] = 489;
+    }
+    metadata.original_paths[join_path(source, "directory-upper")] = join_path(
+        source, "Lib"
+    );
+    metadata.original_paths[join_path(source, "directory-lower")] = join_path(
+        source, "lib"
+    );
+    link = join_path(source, "virtual-link");
+    metadata.original_paths[link] = join_path(source, "share/terminfo/e/ETERM");
+    metadata.symlinks[link] = "Eterm";
+    metadata.modes[link] = 511;
+    archive = source + ".tar.gz";
+    writer = ArchiveWriter(
+        source=source, destination=archive, windows_zip=False, metadata=metadata
+    );
+    writer.start();
+    while not writer.done {
+        writer.advance();
+    }
+    destination = source + "-staged";
+    # Exercise Windows naming rules on every host, including Linux CI.
+    reader = Extractor(source=archive, destination=destination, case_sensitive=False);
+    reader.start();
+    while not reader.done {
+        reader.advance();
+    }
+    for (_, original, content) in entries {
+        path = reader.metadata.stored_path(join_path(destination, original));
+        assert read_text(path) == content;
+        assert reader.metadata.modes[path] == 489;
+    }
+    assert len(reader.metadata.original_paths) > 0;
+    evidence = EvidenceTask(directory=destination, metadata=reader.metadata);
+    evidence.start();
+    while not evidence.done {
+        evidence.advance();
+    }
+    sums = read_text(join_path(destination, "SHA256SUMS"));
+    assert len(sums.splitlines()) == len(entries);
+    for (_, original, _) in entries {
+        path = reader.metadata.stored_path(join_path(destination, original));
+        assert file_sha256(path) + "  " + original + "\n" in sums;
+    }
+    repacked = source + "-repacked.tar.gz";
+    writer = ArchiveWriter(
+        source=destination,
+        destination=repacked,
+        windows_zip=False,
+        metadata=reader.metadata
+    );
+    writer.start();
+    while not writer.done {
+        writer.advance();
+    }
+    restored = source + "-restored";
+    final_reader = Extractor(source=repacked, destination=restored);
+    final_reader.start();
+    while not final_reader.done {
+        final_reader.advance();
+    }
+    for (_, original, content) in entries {
+        path = final_reader.metadata.stored_path(join_path(restored, original));
+        assert read_text(path) == content;
+        assert final_reader.metadata.modes[path] == 489;
+    }
+    final_link = final_reader.metadata.stored_path(
+        join_path(restored, "share/terminfo/e/ETERM")
+    );
+    assert final_reader.metadata.symlinks[final_link] == "Eterm";
+    assert read_text(join_path(restored, "SHA256SUMS")) == sums;
+    # Genuine duplicate members must still fail rather than overwrite data.
+    metadata.original_paths[join_path(source, "b-lower")] = join_path(
+        source, "share/terminfo/e/Eterm"
+    );
+    duplicate = source + "-duplicate.tar.gz";
+    writer = ArchiveWriter(
+        source=source, destination=duplicate, windows_zip=False, metadata=metadata
+    );
+    writer.start();
+    while not writer.done {
+        writer.advance();
+    }
+    reader = Extractor(
+        source=duplicate, destination=source + "-duplicate", case_sensitive=False
+    );
+    rejected = False;
+    try {
+        reader.start();
+        while not reader.done {
+            reader.advance();
+        }
+    } except RuntimeError {
+        rejected = True;
+    } finally {
+        reader.close();
+    }
+    assert rejected;
+    assert read_text(join_path(source + "-duplicate", "share/terminfo/e/Eterm"))
+        == "upper payload";
+}
+
 def seed_job(base: str, target: str) -> BuildJob {
     request = parse_cli(["--target", target, "--output", base, "demo==1"]);
     job = BuildJob(request=request, events=QuietEvents());
@@ -648,6 +767,7 @@ with entry {
         check_archives(staging);
         check_path_cursor(staging);
         check_archive_metadata(staging);
+        check_archive_case_collisions(staging);
         check_windows_launchers(staging);
         print(
             "Archive modes, virtual links, console and windowed launcher contracts passed."

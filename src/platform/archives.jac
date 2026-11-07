@@ -110,7 +110,21 @@ obj DeferredLink {
 obj:pub ArchiveMetadata {
     has modes: dict[str, int] = {},
         symlinks: dict[str, str] = {},
-        executable_roots: list[str] = [];
+        executable_roots: list[str] = [],
+        original_paths: dict[str, str] = {};
+
+    def original_path(stored: str) -> str {
+        return self.original_paths.get(stored, stored);
+    }
+
+    def stored_path(original: str) -> str {
+        for stored in self.original_paths {
+            if self.original_paths[stored] == original {
+                return stored;
+            }
+        }
+        return original;
+    }
 }
 
 obj:pub Extractor {
@@ -127,9 +141,55 @@ obj:pub Extractor {
         links: list[DeferredLink] = [],
         link_index: int = 0,
         metadata: ArchiveMetadata = ArchiveMetadata(),
+        case_sensitive: bool = sys.platform != "win32",
+        member_paths: dict[str, str] = {},
+        host_paths: dict[str, str] = {},
+        alias_index: int = 0,
         materialize_symlinks: bool = sys.platform != "win32";
 
+    def member_path(name: str) -> str {
+        if self.case_sensitive {
+            return join_path(self.destination, name);
+        }
+        original = "";
+        stored = self.destination;
+        for part in name.split("/") {
+            original = join_path(original, part);
+            if original in self.member_paths {
+                stored = self.member_paths[original];
+                continue;
+            }
+            candidate = join_path(stored, part);
+            if candidate.lower() in self.host_paths {
+                # Keep both payloads on a case-insensitive builder. Archive
+                # headers and evidence retain the original target names.
+                while True {
+                    candidate = join_path(
+                        stored, "_bundlr_case_" + str(self.alias_index)
+                    );
+                    self.alias_index += 1;
+                    if candidate.lower() not in self.host_paths
+                        and not stat_path(candidate).exists {
+                        break;
+                    }
+                }
+            }
+            self.member_paths[original] = candidate;
+            self.host_paths[candidate.lower()] = original;
+            if candidate != join_path(self.destination, original) {
+                self.metadata.original_paths[candidate] = join_path(
+                    self.destination, original
+                );
+            }
+            stored = candidate;
+        }
+        return stored;
+    }
+
     def start {
+        if not self.case_sensitive {
+            self.materialize_symlinks = False;
+        }
         make_dirs(self.destination);
         self.handle = archive_read_new();
         if self.handle.is_null() {
@@ -163,12 +223,13 @@ obj:pub Extractor {
         if self.archive_done {
             if self.link_index < len(self.links) {
                 link = self.links[self.link_index];
-                destination = join_path(self.destination, link.name);
+                destination = self.member_path(link.name);
                 make_dirs(parent_path(destination));
                 if link.hard {
-                    hard_link(join_path(self.destination, link.target), destination);
+                    target = self.member_path(link.target);
+                    hard_link(target, destination);
                     self.metadata.modes[destination] = self.metadata.modes.get(
-                        join_path(self.destination, link.target), 420
+                        target, 420
                     );
                 } elif self.materialize_symlinks {
                     symlink_file(link.target, destination);
@@ -210,7 +271,7 @@ obj:pub Extractor {
                 & 511;
             return;
         }
-        path = join_path(self.destination, name);
+        path = self.member_path(name);
         kind = int(archive_entry_filetype(header));
         mode = int(archive_entry_perm(header)) & 511;
         self.metadata.modes[path] = mode;
@@ -407,7 +468,8 @@ obj:pub ArchiveWriter {
         if self.windows_zip {
             check_zip_limits(self.source_bytes, self.entry_count);
         }
-        name = base_name(self.source) + path[len(self.source):];
+        original = self.metadata.original_path(path);
+        name = base_name(self.source) + original[len(self.source):];
         header = archive_entry_new();
         try {
             archive_entry_set_pathname_utf8(header, name);

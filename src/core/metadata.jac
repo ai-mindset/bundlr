@@ -12,7 +12,7 @@ import from src.platform.files {
     read_chunk,
     close_file
 }
-import from src.platform.archives { tree_entries }
+import from src.platform.archives { tree_entries, ArchiveMetadata }
 
 obj:pub EntryPoint {
     has command: str,
@@ -303,6 +303,7 @@ obj:pub HashTask {
 
 obj:pub EvidenceTask {
     has directory: str,
+        metadata: ArchiveMetadata = ArchiveMetadata(),
         paths: Iterator[str] | None = None,
         hashing: HashTask | None = None,
         lines: list[str] = [],
@@ -326,7 +327,8 @@ obj:pub EvidenceTask {
         if hashing is not None {
             hashing.advance();
             if hashing.done {
-                relative = hashing.path[len(self.directory) + 1:].replace("\\", "/");
+                original = self.metadata.original_path(hashing.path);
+                relative = original[len(self.directory) + 1:].replace("\\", "/");
                 self.lines.append(hashing.digest + "  " + relative);
                 self.hashing = None;
             }

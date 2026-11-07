@@ -59,6 +59,9 @@ the Windows filesystem. Copying the Windows-staged directory cannot preserve the
 For these archives, installed package assets receive execute permission so wheels
 that contain helper executables remain usable; their read/write permissions do not
 change. Runtime files retain their original Unix permissions.
+When Unix archive names differ only by case, Windows staging uses distinct
+backing names. The generated archive and `SHA256SUMS` retain the original target
+paths and all file contents. Use the archive when delivering these Unix targets.
 
 ## Verify and support generated applications
 
