@@ -1,8 +1,13 @@
 """One cooperative packaging state machine, used by the CLI and loopback interface."""
 import time;
 import sys;
+import os;
 import from src.domain.request { PackageRequest, validate_request, PYTHON_VERSION }
-import from src.core.distribution { distribution, PythonDistribution }
+import from src.core.distribution {
+    distribution,
+    PythonDistribution,
+    runtime_cache_name
+}
 import from src.core.metadata {
     EntryPoint,
     installed_entry_point,
@@ -25,11 +30,13 @@ import from src.platform.files {
     remove_tree,
     read_text,
     write_text,
-    hard_link
+    hard_link,
+    parent_path,
+    rename_file
 }
 import from src.platform.publication { publish_directory }
 import from src.platform.urls { validate_git_url }
-import from src.platform.uv_runtime { resolve_uv }
+import from src.platform.uv_runtime { resolve_uv, cache_base }
 import from src.platform.processes { Child, ProcessEvents, start_child }
 import from src.platform.downloads { Download }
 import from src.platform.archives { Extractor, ArchiveWriter, ArchiveMetadata }
@@ -95,6 +102,10 @@ obj:pub BuildJob {
         artifact_path: str = "",
         archive_path: str = "",
         archive_digest: str = "",
+        runtime_archive: str = "",
+        runtime_cache_path: str = "",
+        runtime_staging: str = "",
+        runtime_cache_invalid: bool = False,
         download: Download | None = None,
         extractor: Extractor | None = None,
         writer: ArchiveWriter | None = None,
@@ -179,7 +190,7 @@ obj:pub BuildJob {
                 raise RuntimeError("Python runtime download failed: " + task.error);
             }
             self.download = None;
-            self.hashing = HashTask(path=join_path(self.staging, "python.tar.gz"));
+            self.hashing = HashTask(path=self.runtime_archive);
             self.hashing.start();
             self.phase = "verify";
             return;
@@ -195,11 +206,43 @@ obj:pub BuildJob {
                 return;
             }
             if hashing.digest != selected.sha256 {
+                if self.runtime_staging == "" {
+                    self.hashing = None;
+                    self.runtime_cache_invalid = True;
+                    self.events.stderr(
+                        "Cached Python runtime failed verification; downloading again.\n"
+                    );
+                    self.start_runtime_download();
+                    return;
+                }
                 raise RuntimeError("Python runtime failed SHA-256 verification.");
             }
             self.hashing = None;
+            if self.runtime_staging != "" {
+                published = False;
+                try {
+                    if self.runtime_cache_invalid {
+                        rename_file(self.runtime_archive, self.runtime_cache_path);
+                    } else {
+                        hard_link(self.runtime_archive, self.runtime_cache_path);
+                    }
+                    published = True;
+                } except RuntimeError {
+                    if not stat_path(self.runtime_cache_path).is_file() {
+                        raise;
+                    }
+                    # Another builder may have its cached archive open on
+                    # Windows. Extract our verified private download instead;
+                    # never assume that the competing cache entry is valid.
+                }
+                if published {
+                    remove_tree(self.runtime_staging);
+                    self.runtime_staging = "";
+                    self.runtime_archive = self.runtime_cache_path;
+                }
+            }
             self.extractor = Extractor(
-                source=join_path(self.staging, "python.tar.gz"),
+                source=self.runtime_archive,
                 destination=join_path(self.resources, "runtime")
             );
             self.extractor.start();
@@ -218,6 +261,10 @@ obj:pub BuildJob {
             }
             self.archive_metadata = extractor.metadata;
             self.extractor = None;
+            if self.runtime_staging != "" {
+                remove_tree(self.runtime_staging);
+                self.runtime_staging = "";
+            }
             executable_path = join_path(
                 self.resources, "runtime/" + selected.executable
             );
@@ -455,9 +502,38 @@ obj:pub BuildJob {
         if selected is None {
             raise RuntimeError("Missing Python distribution.");
         }
-        self.download = Download(
-            url=selected.url(), destination=join_path(self.staging, "python.tar.gz")
+        cache = os.getenv("BUNDLR_PYTHON_CACHE_DIRECTORY");
+        if cache is None or cache == "" {
+            cache = join_path(cache_base(), "python");
+        }
+        self.runtime_cache_path = join_path(
+            cache, runtime_cache_name(selected.url(), selected.sha256)
         );
+        self.prepare_runtime();
+    }
+
+    def prepare_runtime {
+        self.runtime_cache_invalid = False;
+        if stat_path(self.runtime_cache_path).is_file() {
+            self.runtime_archive = self.runtime_cache_path;
+            self.hashing = HashTask(path=self.runtime_archive);
+            self.hashing.start();
+            self.phase = "verify";
+        } else {
+            self.start_runtime_download();
+        }
+    }
+
+    def start_runtime_download {
+        selected = self.python_distribution;
+        if selected is None {
+            raise RuntimeError("Missing Python distribution.");
+        }
+        self.runtime_staging = temp_dir(
+            parent_path(self.runtime_cache_path), ".python-"
+        );
+        self.runtime_archive = join_path(self.runtime_staging, "python.tar.gz");
+        self.download = Download(url=selected.url(), destination=self.runtime_archive);
         self.download.start();
         self.phase = "download";
     }
@@ -500,6 +576,10 @@ obj:pub BuildJob {
         if self.staging != "" {
             remove_tree(self.staging);
             self.staging = "";
+        }
+        if self.runtime_staging != "" {
+            remove_tree(self.runtime_staging);
+            self.runtime_staging = "";
         }
     }
 }

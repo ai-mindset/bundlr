@@ -39,7 +39,7 @@ def required_environment(name: str) -> str {
     return value;
 }
 
-def cache_base -> str {
+def:pub cache_base -> str {
     configured = os.getenv("BUNDLR_CACHE_DIRECTORY");
     if configured is not None and configured != "" {
         return configured;

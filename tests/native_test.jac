@@ -11,14 +11,19 @@ import from tests.domain_test {
 import from tests.http_contract { check_http }
 import from src.domain.request { parse_cli, TARGETS, decode_request }
 import from src.core.build_job { BuildJob, BuildEvents, binary_install_args }
-import from src.core.distribution { distribution }
+import from src.core.distribution {
+    distribution,
+    PythonDistribution,
+    runtime_cache_name
+}
 import from src.core.metadata {
     parse_entry_point,
     application_entries,
     portable_git_wheel,
     wheel_requirements,
     installed_entry_point,
-    EvidenceTask
+    EvidenceTask,
+    HashTask
 }
 import from src.core.launchers { resources_path, launcher_zip, create_launcher }
 import from src.platform.files {
@@ -719,6 +724,137 @@ def seed_job(base: str, target: str) -> BuildJob {
     return job;
 }
 
+def runtime_job(base: str, cache: str, digest: str) -> BuildJob {
+    staging = temp_dir(base, "runtime-job-");
+    return BuildJob(
+        request=parse_cli(["--target", "linux-x86_64", "demo==1"]),
+        events=QuietEvents(),
+        staging=staging,
+        resources=join_path(staging, "resources"),
+        runtime_cache_path=cache,
+        python_distribution=PythonDistribution(
+            target="linux-x86_64", triple="fixture", sha256=digest, executable="python3"
+        )
+    );
+}
+
+def check_runtime_cache(base: str) {
+    source = join_path(base, "runtime-fixture");
+    make_dirs(source);
+    write_text(join_path(source, "python3"), "verified runtime fixture");
+    archive = source + ".tar.gz";
+    writer = ArchiveWriter(source=source, destination=archive, windows_zip=False);
+    writer.start();
+    while not writer.done {
+        writer.advance();
+    }
+    payload = read_bytes(archive);
+    digest = file_sha256(archive);
+    identities = [
+        "https://example.invalid/cpython-3.12.13+1-linux.tar.gz",
+        "https://example.invalid/cpython-3.12.14+1-linux.tar.gz",
+        "https://example.invalid/cpython-3.12.13+2-linux.tar.gz",
+        "https://example.invalid/cpython-3.12.13+1-windows.tar.gz"
+    ];
+    names = [runtime_cache_name(url, digest) for url in identities];
+    assert len(set(names)) == len(identities);
+    assert runtime_cache_name(identities[0], "0" * 64) != names[0];
+    assert runtime_cache_name(identities[0], digest) == names[0];
+    cache = join_path(base, "python-cache/" + digest + ".tar.gz");
+    # Repair an archive whose checksum failed, then publish a second verified
+    # download while the first extractor still holds the shared cache open.
+    make_dirs(parent_path(cache));
+    for invalid in [False, True] {
+        if invalid {
+            write_text(cache, "corrupt cached runtime", False);
+        }
+        readers: list[BuildJob] = [];
+        for i in range(2) {
+            job = runtime_job(base, cache, digest);
+            job.runtime_cache_invalid = invalid and i == 0;
+            job.runtime_staging = temp_dir(parent_path(cache), ".python-");
+            partial = job.runtime_staging;
+            job.runtime_archive = join_path(partial, "python.tar.gz");
+            write_bytes(job.runtime_archive, payload);
+            job.hashing = HashTask(path=job.runtime_archive);
+            job.hashing.start();
+            job.phase = "verify";
+            finish(job, "extract");
+            assert job.error == "";
+            assert file_sha256(cache) == digest;
+            assert stat_path(partial).exists == (i == 1);
+            assert (job.runtime_archive == cache) == (i == 0);
+            readers.append(job);
+        }
+        for job in readers {
+            reader = job.extractor;
+            assert reader is not None;
+            while not reader.done {
+                reader.advance();
+            }
+            assert read_text(join_path(job.resources, "runtime/python3"))
+                == "verified runtime fixture";
+            partial = job.runtime_staging;
+            job.cleanup();
+            if partial != "" {
+                assert not stat_path(partial).exists;
+            }
+        }
+    }
+    # A warm cache is still hashed before an extractor can use it.
+    job = runtime_job(base, cache, digest);
+    job.prepare_runtime();
+    assert job.phase == "verify";
+    assert job.download is None;
+    finish(job, "extract");
+    assert job.error == "";
+    reader = job.extractor;
+    assert reader is not None;
+    while not reader.done {
+        reader.advance();
+    }
+    assert read_text(join_path(job.resources, "runtime/python3"))
+        == "verified runtime fixture";
+    job.cleanup();
+    # Cache misses and corrupt hits fall back to a private download. Cancellation
+    # removes it without publishing an archive or touching the existing cache.
+    for corrupt in [False, True] {
+        path = cache
+            if corrupt
+            else join_path(base, "empty-cache/" + digest + ".tar.gz");
+        if corrupt {
+            write_text(path, "corrupt cached runtime", False);
+        }
+        job = runtime_job(base, path, digest);
+        job.prepare_runtime();
+        if corrupt {
+            finish(job, "download");
+        }
+        assert job.phase == "download";
+        partial = job.runtime_staging;
+        assert stat_path(partial).is_dir();
+        assert job.runtime_archive != path;
+        job.cancel();
+        job.advance();
+        assert job.error == "Build cancelled.";
+        assert not stat_path(partial).exists;
+        assert stat_path(path).exists == corrupt;
+    }
+    # Downloaded bytes with a bad checksum must never replace a cache entry.
+    job = runtime_job(base, cache, digest);
+    job.runtime_staging = temp_dir(parent_path(cache), ".python-");
+    partial = job.runtime_staging;
+    job.runtime_archive = join_path(partial, "python.tar.gz");
+    write_text(job.runtime_archive, "bad download");
+    job.hashing = HashTask(path=job.runtime_archive);
+    job.hashing.start();
+    job.phase = "verify";
+    finish(job);
+    assert job.error == "Python runtime failed SHA-256 verification.";
+    assert read_text(cache) == "corrupt cached runtime";
+    assert not stat_path(partial).exists;
+}
+
 def finish(job: BuildJob, stop: str = "") {
     for i in range(10000) {
         if job.done or (stop != "" and job.phase == stop) {
@@ -822,8 +958,9 @@ with entry {
         );
         print("Process streaming and cancellation passed.");
         check_builds(staging);
+        check_runtime_cache(staging);
         print(
-            "Four-target layout, evidence, publication races, failure cleanup passed."
+            "Four-target layout, evidence, publication races, verified runtime cache and failure cleanup passed."
         );
         check_http();
         print(

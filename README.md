@@ -1,232 +1,121 @@
 # Bundlr 📦
 
-Bundlr turns a pinned PyPI requirement or HTTPS Git project into a self-contained
+Bundlr packages a pinned PyPI requirement or HTTPS Git project into a self-contained
 Python application for Linux x64, Windows x64, or macOS ARM64/x64. Recipients need
-only the generated application. They do not need Python, Jac, Bun, uv, or Bundlr.
+no Python, Jac, uv, or Bundlr installation.
 
-Bundlr's CLI, packaging engine and browser behavior are authored in
-[Jac](https://jaclang.org). The CLI compiles to native machine code. Its portable
-release includes native libraries, browser assets, a CA bundle and a compressed,
-checksum-pinned `uv` executable. Keep the entire extracted release directory together.
+Written in [Jac](https://jaclang.org), with a native CLI and a local browser UI
+sharing one streamed, cancellable packaging engine. Bundled Python: **3.12.13**.
 
-## Use Bundlr
+## Usage
 
-Download the archive for your **builder** platform, verify its `.sha256` file, and
-extract it. Run `bundlr` (`bundlr.exe` on Windows) with no arguments to open the
-local browser interface. Use **Quit Bundlr** to stop it; closing the last page
-also stops the server after a short grace period.
-
-From a terminal:
+Download the release for your **builder** platform, verify its `.sha256`, and
+extract the complete directory. Run `bundlr` (`bundlr.exe` on Windows) without
+arguments to open the browser UI. Use **Quit Bundlr** to stop it.
 
 ```sh
 ./bundlr --diagnose
 ./bundlr --command black --target all "black==26.5.1"
 ./bundlr --name PipUI --command pip-ui --kind windowed \
   --target windows-x86_64 --output dist/pipui-0.2.0 "pip-ui-tkinter==0.2.0"
-./bundlr --target all \
-  https://github.com/example/example-app.git@0123456789abcdef0123456789abcdef01234567
 ```
 
-PyPI sources must use an exact version, optionally with extras:
-`name[extra]==1.2.3`. Ranges, wildcards, local paths and HTTP Git URLs are rejected.
-Git sources may include `git+`, `@revision` and `#subdirectory=...`. Use a full
-commit for reproducible Git inputs. Git builds require system Git and can execute
-the project's build backend on the controlled builder.
+Sources must be `name[extras]==version` or an HTTPS Git URL. Git URLs accept
+`git+`, `@revision`, and `#subdirectory=...`; use a full commit for reproducibility.
+Git builds require system Git and can execute the project's build backend.
+Run builds on a controlled builder; Bundlr is not a security sandbox.
 
-Bundlr detects the application name, entry point and console/GUI type when possible.
-When several commands exist, it prefers a unique command matching the requested
-distribution's name (ignoring case and normalizing `.`, `_` and `-`). For example,
-`black==26.10.1` defaults to `black`; `--command blackd` selects the daemon instead.
-Use `--name`, `--command` and `--kind` to resolve ambiguity. Options precede the
-single source. `bundlr package ...` remains an alias. `--help` lists all options.
-Python 3.12 / 3.12.13 is supported. Repeat `--target`, or select `all`.
+Options precede the source. `--name`, `--command`, and `--kind` override detection;
+repeat `--target` or use `all`. Run `--help` for the complete CLI.
 
-Each target produces an application directory, a client archive and its checksum:
-
-| Target | Application launcher | Client archive |
+| Target | Application | Archive |
 | --- | --- | --- |
-| Linux x64 | `Name-linux-x86_64/Name` | `.tar.gz` |
-| Windows x64 | `Name-windows-x86_64/Name.exe` | `.zip` |
-| macOS ARM64 | `Name-macos-arm64.app` | `.tar.gz` |
-| macOS x64 | `Name-macos-x86_64.app` | `.tar.gz` |
+| `linux-x86_64` | `Name-linux-x86_64/Name` | `.tar.gz` |
+| `windows-x86_64` | `Name-windows-x86_64/Name.exe` | `.zip` |
+| `macos-arm64` | `Name-macos-arm64.app` | `.tar.gz` |
+| `macos-x86_64` | `Name-macos-x86_64.app` | `.tar.gz` |
 
-Extract the entire application before launching it. Copying just its launcher is
-insufficient. Bundlr refuses to overwrite a completed directory, archive or
-checksum, including when two builds race. Use a new versioned output directory.
-On Windows builders, send the generated archives for Unix targets: Bundlr retains
-Unix runtime permissions and symbolic links in archive metadata independently of
-the Windows filesystem. Copying the Windows-staged directory cannot preserve them.
-For these archives, installed package assets receive execute permission so wheels
-that contain helper executables remain usable; their read/write permissions do not
-change. Runtime files retain their original Unix permissions.
-When Unix archive names differ only by case, staging on a case-insensitive volume
-uses distinct backing names, including on default macOS volumes. The generated
-archive and `SHA256SUMS` retain the original target paths and all file contents.
-Use the archive when delivering these Unix targets.
+Deliver the archive and its checksum, and extract the entire application before
+launching. Use archives for Unix targets built on Windows or case-insensitive
+volumes so target paths, symlinks, and permission metadata reach the recipient.
 
-## Verify and support generated applications
+## Packaging guarantees
 
-Keep an archive and its `.sha256` file together. On Linux use
-`sha256sum --check Name-windows-x86_64.zip.sha256`; on macOS use
-`shasum -a 256 --check Name-windows-x86_64.zip.sha256`.
+- Python and uv downloads are SHA-256 verified; cached bytes are checked before use.
+- Target dependencies require compatible wheels. Git root wheels must be pure
+  Python with portable tags; foreign target executables are never run during packaging.
+- Launchers use bundled Python with `-I -B`, independently of the builder's Python.
+- Completed directories, archives, and checksums are never overwritten. Use a new
+  output directory for subsequent builds.
+- The native executable and complete compressed Bundlr release must each stay
+  below **50 MiB**. Releases include a `.size.json` report.
 
-On Windows PowerShell:
+## Verification and support
 
-```powershell
-$archive = ".\Name-windows-x86_64.zip"
-$expected = ((Get-Content "$archive.sha256" -Raw).Trim() -split "\s+")[0]
-if ((Get-FileHash $archive -Algorithm SHA256).Hash -ine $expected) {
-    throw "SHA-256 verification failed"
-}
-```
+Verify archives with `sha256sum --check FILE.sha256` on Linux,
+`shasum -a 256 --check FILE.sha256` on macOS, or compare `Get-FileHash` output with
+its checksum file on Windows.
 
-Evidence is at the application root, or `Contents/Resources` inside a macOS app:
+Each application includes these files at its root, or in `Contents/Resources` on macOS:
 
-- `bundlr-manifest.json`: format version, application identity, source, selected
-  entry point, target, Python version and Bundlr version.
+- `bundlr-manifest.json`: application, source, entry point, target, and version identity.
 - `bundlr-dependencies.json`: installed distribution names and versions.
-- `THIRD_PARTY_LICENSES.txt`: collected runtime and distribution licence notices.
-- `SHA256SUMS`: sorted hashes of regular files relative to that evidence directory,
-  excluding `SHA256SUMS` itself. The external archive checksum covers the full app.
+- `THIRD_PARTY_LICENSES.txt`: runtime and distribution licence notices.
+- `SHA256SUMS`: sorted regular-file hashes relative to that directory, excluding itself.
 
-These files document a build; they are not signatures, vulnerability assessments
-or a complete software bill of materials. Use [IT_SUPPORT_REPORT.md](IT_SUPPORT_REPORT.md)
+The archive checksum covers the complete application. These records are not
+signatures or vulnerability assessments. See [IT_SUPPORT_REPORT.md](IT_SUPPORT_REPORT.md)
 for deployment evidence and clean-device acceptance.
 
-Bundlr combines checksum-pinned
-[python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-runtimes with target-compatible wheels selected by [uv](https://docs.astral.sh/uv/).
-It prohibits source builds for target dependencies. A Git root wheel must be pure
-Python with only portable tags before dependencies are installed for the target.
-Foreign target executables are never run during packaging. Launchers use bundled
-Python with `-I -B` and do not use the builder's Python.
+## Configuration
 
-The browser server binds only to `127.0.0.1` on a random port. It checks Host,
-mutation tokens and browser Origin, and permits one active build. CLI and browser
-share the same streamed, cancellable packaging engine.
-Windows builds use the included `bundlr-child.exe` runner and a per-build Job
-Object to stop the complete build process tree before cleaning staging.
+| Variable | Purpose |
+| --- | --- |
+| `BUNDLR_CACHE_DIRECTORY` | Override the platform's Bundlr runtime cache directory. |
+| `BUNDLR_PYTHON_CACHE_DIRECTORY` | Store Python archives separately from the tool cache. |
+| `BUNDLR_UV_EXECUTABLE` | Use a host uv binary matching the compiled checksum. |
+| `BUNDLR_CA_BUNDLE` | Select a CA bundle for Bundlr's HTTPS downloads. |
 
-## Release size and cache
-
-Both the native executable and **complete compressed release** must be below
-50 MiB (52,428,800 bytes). A build fails before publication if either limit is hit.
-Every release includes a `.size.json` report with executable, full archive,
-unpacked, native-library and compressed/expanded uv sizes.
-
-The local Linux development build measured about 2 MiB for the executable and
-24 MiB for its archive, including compressed uv. Its system libraries do not prove
-production portability or production size. CI builds the pinned dependency closure
-and enforces the same limit on all four releases. Expanded uv is about 57 MiB and
-is cached on first use; it is verified again before each execution.
-
-Default caches are `$XDG_CACHE_HOME/bundlr/runtime` (or `~/.cache/bundlr/runtime`)
-on Linux, `~/Library/Caches/bundlr/runtime` on macOS, and
-`%LOCALAPPDATA%/Bundlr/runtime` on Windows. `BUNDLR_CACHE_DIRECTORY` overrides the
-cache root. `BUNDLR_UV_EXECUTABLE` accepts only an executable matching the compiled
-host checksum. `BUNDLR_CA_BUNDLE` can select an organization CA bundle for Bundlr's
-HTTPS downloads. uv uses its own documented certificate/proxy configuration.
+Python archives are keyed by URL and pinned SHA-256. Every reuse is verified;
+corrupt entries are downloaded again, and partial downloads are removed on failure
+or cancellation. uv uses its own certificate and proxy configuration.
 
 ## Development
 
-Use Jac **0.39.1**, CMake 3.25+, a native C toolchain, Git and the platform SDK.
-Linux builds also require `patchelf`, autotools and Ninja. Install the pinned Jac
-version using the [official installer](https://jaclang.org/docs/latest/quick-guide/install).
-Application source and developer helpers are Jac; helpers run in the developer's
-Jac environment, while released Bundlr contains no Jac interpreter or Python runtime.
+Requires **Jac 0.39.1**, CMake 3.25+, Git, a native C toolchain, and the platform SDK.
+Linux also needs Ninja, patchelf, and autotools. Install Jac using the
+[official installer](https://jaclang.org/docs/latest/quick-guide/install).
 
-From the repository root:
+From the repository root on Linux:
 
 ```sh
+export JAC_CACHE_HOME="$PWD/.build/jac-cache"
 jac run scripts/prepare_uv.jac --target linux-x86_64
 jac fmt --check src scripts tests ui
 jac check src scripts tests ui --lint
 jac check src scripts tests ui
-jac run scripts/build.jac
+jac run scripts/build.jac --prepared-uv
 jac test
 dist/bundlr-linux-x86_64/bundlr --diagnose
 jac run scripts/smoke.jac --runtime dist/bundlr-linux-x86_64 --browser
-.build/tests/acceptance-test builder dist/bundlr-linux-x86_64/bundlr .build/acceptance
 ```
 
-Use the host target for `prepare_uv`. `build.jac` defaults to the host and creates
-`dist/bundlr-TARGET/`, its archive, checksum and size report. It clones vcpkg into
-`.build/`, checks out the immutable baseline in `build-lock.json`, builds libraries
-using `vcpkg.json` and the custom triplets, then verifies and compresses pinned uv.
-Native builds reject Python fallback. No registry JavaScript dependencies are needed.
+The build helper prepares pinned vcpkg libraries and uv, then writes the release
+to `dist/`. Use the matching host target and paths on other platforms.
 
-`--native-libs PATH --target TARGET` consumes a dependency bundle produced on that
-target. Its target, baseline and hashes must match. This permits Windows native
-cross-compilation from Linux. The dependency bundle must preserve relative symlinks.
-macOS releases compile on an ARM Mac using Jac 0.39.1. The Intel release uses
-`--target-triple x86_64-apple-darwin` and libraries built on Intel macOS; both Mac
-architectures retain the library-path audit. Native acceptance runs on each target
-architecture, including Intel macOS, without requiring a Jac compiler there.
+`jac test` delegates to the native contract suite. Set `BUNDLR_TEST_NATIVE_LIBS`
+for a bundle outside `.build/native/HOST/portable-libs`, and `BUNDLR_TEST_TARGET`
+for cross-compilation. Browser checks require Chrome.
 
-Windows compilation requires an isolated compiler cache: set `JAC_CACHE_HOME`
-to an absolute build directory, as CI does with `.build/jac-cache`.
-`scripts/build.jac` and `scripts/test.jac` prepare that compiler's native regex
-runtime before compiling Windows. Jac 0.39.1 otherwise imports POSIX `sched_yield`
-from Windows UCRT and fails at startup with `0xC0000139`. The checksum-guarded
-`scripts/prepare_jac.jac` uses Kernel32 `SwitchToThread` for Windows builds and
-restores the original POSIX sources before Unix builds. It retains the atomic
-cache lock and accepts only the pinned upstream files or the same patch already
-applied. For a direct Windows
-`jac build`, first run `jac run scripts/prepare_jac.jac --target windows-x86_64`
-in the same cache. Before directly compiling a Unix target in that cache, run the
-preparation helper with that target instead. Use separate caches for concurrent
-builds of different targets.
+Build helpers prepare Jac's Windows compiler workaround automatically. For direct
+native builds, first run `jac run scripts/prepare_jac.jac --target TARGET`. Keep an
+absolute `JAC_CACHE_HOME` separate for each concurrent target.
 
-`--development-libs PATH` permits local shared libraries for diagnosis. Its outputs
-are named `bundlr-dev-*` and are never release evidence. `--prepared-uv` reuses
-previously prepared bytes after SHA-256 verification. Generated output stays ignored.
+`build.jac --native-libs PATH --target TARGET` accepts a matching dependency bundle.
+`--prepared-uv` reuses verified prepared bytes. `--development-libs PATH` produces
+diagnostic `bundlr-dev-*` builds, not production release evidence.
 
-Tests compile to native executables to exercise the release ABI, filesystem,
-archives, processes, HTTP parser and state machine. `scripts/smoke.jac` also checks
-uv cache repair, invalid tool rejection and live loopback controls. `--browser`
-requires Chrome and uses Jac's browser tooling for validation, cancellation and a
-real packaging flow. `jac test` discovers a hosted runner in `tests/runner/` that
-invokes `scripts/test.jac`; application contracts still run in native executables.
-The runner uses the pinned bundle from `.build/native/HOST/portable-libs`, prepared
-by `scripts/build.jac`. Set `BUNDLR_TEST_NATIVE_LIBS` for another bundle location
-and `BUNDLR_TEST_TARGET` for a cross-compilation target. CI uses these overrides.
-The explicit helper remains available:
-
-```sh
-jac run scripts/test.jac --native-libs .build/native/linux-x86_64/portable-libs
-```
-
-Do not pass the native contract programs directly to `jac test`: Jac 0.39.1's
-hosted loader aborts while importing their native FFI declarations. The dedicated
-runner compiles them through the same native path as the release.
-
-GitHub Actions checks source, builds pinned dependencies and portable releases for
-four hosts, runs target-host contract tests and Linux-to-target Black acceptance,
-and publishes archives/checksums/size reports for `v*` tags only after smoke tests.
-CI reuses native dependency bundles when their target, triplet, runner and pinned
-build inputs match. Jac compilation state is cached separately; every run still
-builds releases and executes all acceptance checks. A standalone Windows compiler
-runtime test runs before native dependencies are built, so compiler startup
-failures stop the workflow before the expensive build phase.
-Every host must also package and run pinned Black and a Git fixture through the
-released CLI. Git tests use committed local repositories and a test-scoped HTTPS
-URL rewrite; they exercise Git, PEP 517, target dependency markers and rejection
-of a nonportable root wheel without relying on a mutable external project.
-Windows additionally runs a real Tk GUI through `pythonw.exe`, with builder tools
-removed from the recipient's PATH, and packages all four targets. Separate Linux
-and macOS jobs extract the Windows-built archives with the host's `tar` and launch
-both applications. These jobs need no Jac installation on recipient runners.
-
-The **Production readiness (all four hosts)** check fails if any build or
-acceptance matrix fails, is skipped or is cancelled; publishing requires that
-check to succeed. Require that same status in repository branch protection to
-gate merges as well as releases.
-
-Windows and macOS runtime checks, the production dependency closure and real browser
-acceptance have not been run in the current restricted Linux workspace.
-
-Earlier packaging pipelines successfully delivered PipUI 0.2.0 and Black 26.5.1 to
-a Windows machine without Python. That historical evidence has not yet been repeated
-on a clean device for this Jac rewrite:
-
-![Earlier PipUI build running on Windows](assets/pipui.png)
+CI runs on PRs, `main`, version tags, and manual dispatches. It caches dependencies
+and verified runtime archives, builds platforms independently, and checks native,
+browser, GUI, and cross-platform recipient behavior. Require **Production readiness
+(all four hosts)** in branch protection; releases require every check to succeed.

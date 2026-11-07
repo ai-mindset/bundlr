@@ -1,29 +1,34 @@
 name: Native Jac release
-
-on:
+'on':
   push:
-    branches: [main, rewrite/jac]
-    tags: ["v*"]
-  pull_request:
-  workflow_dispatch:
-
+    branches:
+      - main
+    tags:
+      - v*
+  pull_request: null
+  workflow_dispatch: null
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 env:
   JAC_VERSION: 0.39.1
   JAC_CACHE_HOME: ${{ github.workspace }}/.build/jac-cache
   VCPKG_BASELINE: 9eec002df1cd109f8f104cd966a763daf9751489
-
 jobs:
   verify:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
+      - name: Read and check pinned compiler and native baseline
+        id: pins
+        run: |
+          test "$(jq -r .jacVersion build-lock.json)" = "$JAC_VERSION"
+          test "$(jq -r .vcpkgBaseline build-lock.json)" = "$VCPKG_BASELINE"
+          test "$(jq -r '.["builtin-baseline"]' vcpkg.json)" = "$VCPKG_BASELINE"
+          test "$(jq -r .llhttpVersion build-lock.json)" = "$(jq -r '.overrides[] | select(.name == "llhttp") | .version' vcpkg.json)"
+          jq -r '"jac-version=\(.jacVersion)\nvcpkg-baseline=\(.vcpkgBaseline)"' build-lock.json >> "$GITHUB_OUTPUT"
       - name: Install pinned Jac
         env:
           GH_TOKEN: ${{ github.token }}
@@ -45,7 +50,9 @@ jobs:
           name: windows-compiler-probe
           path: .build/windows-compiler-probe.exe
           if-no-files-found: error
-
+    outputs:
+      jac-version: ${{ steps.pins.outputs.jac-version }}
+      vcpkg-baseline: ${{ steps.pins.outputs.vcpkg-baseline }}
   windows-compiler-acceptance:
     needs: verify
     runs-on: windows-2022
@@ -63,104 +70,60 @@ jobs:
           if ($compilerExitCode -ne 0) {
             throw ("Windows compiler runtime failed with exit code {0} (0x{0:X8})" -f $compilerExitCode)
           }
-
-  native-dependencies:
-    needs: windows-compiler-acceptance
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            target: linux-x86_64
-            triplet: bundlr-x64-linux
-          - runner: windows-2022
-            target: windows-x86_64
-            triplet: bundlr-x64-windows
-          - runner: macos-15
-            target: macos-arm64
-            triplet: bundlr-arm64-osx
-          - runner: macos-15-intel
-            target: macos-x86_64
-            triplet: bundlr-x64-osx
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v6
-      - name: Restore pinned native bundle
-        id: native-cache
-        uses: actions/cache@v5
-        with:
-          path: native-${{ matrix.target }}.tar.gz
-          # Bump v1 if the native build command below changes its configuration.
-          key: native-v1-${{ matrix.runner }}-${{ matrix.target }}-${{ matrix.triplet }}-${{ hashFiles('build-lock.json', 'vcpkg.json', 'native/**', 'scripts/triplets/**') }}
-      - uses: actions/checkout@v6
-        if: steps.native-cache.outputs.cache-hit != 'true'
-        with:
-          repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_BASELINE }}
-          path: .build/vcpkg
-          # Version overrides resolve historical port trees, including llhttp 9.2.1.
-          fetch-depth: 0
-      - name: Install Linux build tools
-        if: steps.native-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build patchelf autoconf automake libtool
-      - name: Configure Microsoft x64 compiler environment
-        if: steps.native-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $bundlrEnvBefore = @{}
-          Get-ChildItem Env: | ForEach-Object { $bundlrEnvBefore[$_.Name] = $_.Value }
-          $bundlrVsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $bundlrVsRoot = & $bundlrVsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or -not $bundlrVsRoot) {
-            throw 'Could not locate the installed Microsoft x64 compiler tools.'
-          }
-          $bundlrDevShell = Join-Path $bundlrVsRoot 'Common7/Tools/Launch-VsDevShell.ps1'
-          & $bundlrDevShell -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
-          Get-Command cl.exe, link.exe | Select-Object Name, Source
-          Get-ChildItem Env: | Where-Object { $bundlrEnvBefore[$_.Name] -cne $_.Value } | ForEach-Object {
-            $bundlrDelimiter = [guid]::NewGuid().ToString('N')
-            "$($_.Name)<<$bundlrDelimiter`n$($_.Value)`n$bundlrDelimiter" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          }
-      - name: Bootstrap vcpkg on Unix
-        if: steps.native-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
-        run: sh .build/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-      - name: Bootstrap vcpkg on Windows
-        if: steps.native-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
-        shell: cmd
-        run: .build\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-      - name: Build complete pinned native dependency bundle
-        if: steps.native-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          cmake -S native -B .build/native -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$PWD/.build/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_MANIFEST_DIR="$PWD" -DVCPKG_OVERLAY_TRIPLETS="$PWD/scripts/triplets" \
-            -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
-          cmake --build .build/native --config Release
-          tar -czf native-${{ matrix.target }}.tar.gz -C .build/native/portable-libs .
-      - uses: actions/upload-artifact@v6
-        with:
-          name: native-${{ matrix.target }}
-          path: native-${{ matrix.target }}.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-
-  build:
-    needs: native-dependencies
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            target: linux-x86_64
-          - runner: ubuntu-22.04
-            target: windows-x86_64
-          - runner: macos-15
-            target: macos-arm64
-          # Jac 0.39.1 ships an ARM compiler; Intel execution is checked in smoke.
-          - runner: macos-15
-            target: macos-x86_64
-    runs-on: ${{ matrix.runner }}
+  # Keep per-target dependencies explicit so a matrix cannot add global barriers.
+  build-linux:
+    needs:
+      - verify
+      - windows-compiler-acceptance
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      target: linux-x86_64
+      triplet: bundlr-x64-linux
+      dependency-runner: ubuntu-22.04
+      build-runner: ubuntu-22.04
+      jac-version: ${{ needs.verify.outputs.jac-version }}
+      vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
+  build-windows:
+    needs:
+      - verify
+      - windows-compiler-acceptance
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      target: windows-x86_64
+      triplet: bundlr-x64-windows
+      dependency-runner: windows-2022
+      build-runner: ubuntu-22.04
+      jac-version: ${{ needs.verify.outputs.jac-version }}
+      vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
+  build-macos-arm64:
+    needs:
+      - verify
+      - windows-compiler-acceptance
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      target: macos-arm64
+      triplet: bundlr-arm64-osx
+      dependency-runner: macos-15
+      build-runner: macos-15
+      jac-version: ${{ needs.verify.outputs.jac-version }}
+      vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
+  build-macos-x86_64:
+    needs:
+      - verify
+      - windows-compiler-acceptance
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      target: macos-x86_64
+      triplet: bundlr-x64-osx
+      dependency-runner: macos-15-intel
+      build-runner: macos-15
+      jac-version: ${{ needs.verify.outputs.jac-version }}
+      vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
+  browser:
+    needs: build-linux
+    runs-on: ubuntu-22.04
+    env:
+      BUNDLR_PYTHON_CACHE_DIRECTORY: ${{ github.workspace }}/.build/python-cache
     steps:
       - uses: actions/checkout@v6
       - name: Install pinned Jac
@@ -170,45 +133,21 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o /tmp/install-jac.sh
           bash /tmp/install-jac.sh --version "$JAC_VERSION"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Cache checksum-verified Python archives
+        uses: actions/cache@v5
+        with:
+          path: .build/python-cache
+          key: python-v1-${{ runner.os }}-linux-x86_64-${{ hashFiles('src/core/distribution.jac', 'src/domain/request.jac') }}
+          restore-keys: python-v1-${{ runner.os }}-linux-x86_64-
       - uses: actions/download-artifact@v7
         with:
-          name: native-${{ matrix.target }}
-          path: .build/download
-      - name: Restore native libraries with relative symlinks
+          name: bundlr-linux-x86_64
+          path: release
+      - name: Extract Linux release
         run: |
-          mkdir -p .build/portable-libs
-          tar -xzf .build/download/native-${{ matrix.target }}.tar.gz -C .build/portable-libs
-      - name: Stamp release version
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          BUNDLR_RELEASE_TAG: ${{ github.ref_name }}
-        run: jac run scripts/stamp_version.jac
-      - name: Restore Jac compilation cache
-        id: jac-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: |
-            ${{ env.JAC_CACHE_HOME }}/jir
-            .jac/cache
-          key: jac-jir-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ env.JAC_VERSION }}-${{ hashFiles('jac.toml', 'build-lock.json', 'src/**', 'scripts/**', 'tests/**', 'ui/**') }}
-          restore-keys: jac-jir-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ env.JAC_VERSION }}-
-      - name: Build release and enforce both 50 MiB limits
-        run: jac run scripts/build.jac --target ${{ matrix.target }} --native-libs .build/portable-libs
-      - name: Compile and run native contract tests
-        env:
-          BUNDLR_TEST_TARGET: ${{ matrix.target }}
-          BUNDLR_TEST_NATIVE_LIBS: .build/portable-libs
-        run: jac test
-      - name: Save successful Jac compilation before browser acceptance
-        if: steps.jac-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ${{ env.JAC_CACHE_HOME }}/jir
-            .jac/cache
-          key: ${{ steps.jac-cache.outputs.cache-primary-key }}
-      - name: Check browser UI and package real applications on Linux
-        if: matrix.target == 'linux-x86_64'
+          mkdir -p dist
+          tar -xzf release/bundlr-linux-x86_64.tar.gz -C dist
+      - name: Check browser UI, live packaging, cancellation and shutdown
         run: |
           BUNDLR_SMOKE_CHROME="$(command -v google-chrome)"
           export BUNDLR_SMOKE_CHROME
@@ -225,150 +164,114 @@ jobs:
             fi
             exit 1
           fi
-          dist/bundlr-linux-x86_64/bundlr --name Black --command black --target all --output .build/applications black==26.5.1
-          .build/applications/Black-linux-x86_64/Black --version
-          tar -czf applications.tar.gz -C .build/applications .
-      - uses: actions/upload-artifact@v6
-        if: matrix.target == 'linux-x86_64'
-        with:
-          name: application-fixtures
-          path: applications.tar.gz
-          compression-level: 0
-      - name: Stage native tests for target-host smoke tests
-        run: tar -czf tests-${{ matrix.target }}.tar.gz -C .build/tests .
-      - uses: actions/upload-artifact@v6
-        with:
-          name: tests-${{ matrix.target }}
-          path: tests-${{ matrix.target }}.tar.gz
-          compression-level: 0
-      - uses: actions/upload-artifact@v6
-        with:
-          name: bundlr-${{ matrix.target }}
-          path: |
-            dist/bundlr-*.tar.gz
-            dist/bundlr-*.zip
-            dist/bundlr-*.sha256
-            dist/bundlr-*.size.json
-          if-no-files-found: error
-          compression-level: 0
-
-  smoke:
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            target: linux-x86_64
-          - runner: windows-2022
-            target: windows-x86_64
-          - runner: macos-15
-            target: macos-arm64
-          - runner: macos-15-intel
-            target: macos-x86_64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/download-artifact@v7
-        with:
-          name: bundlr-${{ matrix.target }}
-          path: release
-      - uses: actions/download-artifact@v7
-        with:
-          name: tests-${{ matrix.target }}
-          path: test-download
-      - uses: actions/download-artifact@v7
-        with:
-          name: application-fixtures
-          path: app-download
-      - name: Smoke test Unix release and cross-built Python application
-        if: runner.os != 'Windows'
-        run: |
-          tar -xzf release/bundlr-${{ matrix.target }}.tar.gz
-          mkdir tests applications
-          tar -xzf test-download/tests-${{ matrix.target }}.tar.gz -C tests
-          tar -xzf app-download/applications.tar.gz -C applications
-          ./bundlr-${{ matrix.target }}/bundlr --diagnose
-          ./tests/native-test "$RUNNER_TEMP"
-          if [ "${{ matrix.target }}" = "linux-x86_64" ]; then
-            ./applications/Black-linux-x86_64/Black --version
-          else
-            ./applications/Black-${{ matrix.target }}.app/Contents/MacOS/Black --version
-          fi
-          ./tests/acceptance-test builder ./bundlr-${{ matrix.target }}/bundlr .build/acceptance
-      - name: Smoke test Windows without Jac, Bun or builder Python
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          function Invoke-BundlrNative([string]$Executable, [string[]]$NativeArguments) {
-            Write-Host "Running $Executable $($NativeArguments -join ' ')"
-            & $Executable @NativeArguments
-            $bundlrExitCode = $LASTEXITCODE
-            if ($bundlrExitCode -ne 0) {
-              throw ("{0} failed with exit code {1} (0x{1:X8})" -f $Executable, $bundlrExitCode)
-            }
-          }
-          Expand-Archive release/bundlr-windows-x86_64.zip .
-          New-Item -ItemType Directory tests, applications | Out-Null
-          Invoke-BundlrNative tar @('-xzf', 'test-download/tests-windows-x86_64.tar.gz', '-C', 'tests')
-          Invoke-BundlrNative tar @('-xzf', 'app-download/applications.tar.gz', '-C', 'applications')
-          Invoke-BundlrNative ./bundlr-windows-x86_64/bundlr.exe @('--diagnose')
-          Invoke-BundlrNative ./tests/native-test.exe @($env:RUNNER_TEMP)
-          Invoke-BundlrNative ./applications/Black-windows-x86_64/Black.exe @('--version')
-          Invoke-BundlrNative ./tests/acceptance-test.exe @('all', './bundlr-windows-x86_64/bundlr.exe', '.build/acceptance')
-      - uses: actions/upload-artifact@v6
-        if: matrix.target == 'windows-x86_64'
-        with:
-          name: windows-built-applications
-          path: |
-            .build/acceptance/Black-*.tar.gz
-            .build/acceptance/Black-*.tar.gz.sha256
-            .build/acceptance/GitDemo-*.tar.gz
-            .build/acceptance/GitDemo-*.tar.gz.sha256
-          if-no-files-found: error
-          compression-level: 0
-
-  windows-builder-acceptance:
-    needs: smoke
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            target: linux-x86_64
-          - runner: macos-15
-            target: macos-arm64
-          - runner: macos-15-intel
-            target: macos-x86_64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/download-artifact@v7
-        with:
-          name: windows-built-applications
-          path: applications
-      - uses: actions/download-artifact@v7
-        with:
-          name: tests-${{ matrix.target }}
-          path: test-download
-      - name: Launch Windows-built PyPI and Git applications after native tar extraction
-        run: |
-          mkdir tests
-          tar -xzf test-download/tests-${{ matrix.target }}.tar.gz -C tests
-          ./tests/acceptance-test consume applications .build/windows-recipient
-
+  linux-fixture-linux:
+    needs: build-linux
+    uses: ./.github/workflows/linux-fixture.yml
+    with:
+      target: linux-x86_64
+  smoke-linux:
+    needs:
+      - build-linux
+      - linux-fixture-linux
+    uses: ./.github/workflows/smoke-platform.yml
+    with:
+      target: linux-x86_64
+      runner: ubuntu-22.04
+  linux-fixture-windows:
+    needs: build-linux
+    uses: ./.github/workflows/linux-fixture.yml
+    with:
+      target: windows-x86_64
+  smoke-windows:
+    needs:
+      - build-windows
+      - linux-fixture-windows
+    uses: ./.github/workflows/smoke-platform.yml
+    with:
+      target: windows-x86_64
+      runner: windows-2022
+  linux-fixture-macos-arm64:
+    needs: build-linux
+    uses: ./.github/workflows/linux-fixture.yml
+    with:
+      target: macos-arm64
+  smoke-macos-arm64:
+    needs:
+      - build-macos-arm64
+      - linux-fixture-macos-arm64
+    uses: ./.github/workflows/smoke-platform.yml
+    with:
+      target: macos-arm64
+      runner: macos-15
+  linux-fixture-macos-x86_64:
+    needs: build-linux
+    uses: ./.github/workflows/linux-fixture.yml
+    with:
+      target: macos-x86_64
+  smoke-macos-x86_64:
+    needs:
+      - build-macos-x86_64
+      - linux-fixture-macos-x86_64
+    uses: ./.github/workflows/smoke-platform.yml
+    with:
+      target: macos-x86_64
+      runner: macos-15-intel
+  windows-recipient-linux:
+    needs:
+      - smoke-windows
+      - build-linux
+    uses: ./.github/workflows/windows-recipient.yml
+    with:
+      target: linux-x86_64
+      runner: ubuntu-22.04
+  windows-recipient-macos-arm64:
+    needs:
+      - smoke-windows
+      - build-macos-arm64
+    uses: ./.github/workflows/windows-recipient.yml
+    with:
+      target: macos-arm64
+      runner: macos-15
+  windows-recipient-macos-x86_64:
+    needs:
+      - smoke-windows
+      - build-macos-x86_64
+    uses: ./.github/workflows/windows-recipient.yml
+    with:
+      target: macos-x86_64
+      runner: macos-15-intel
   production-ready:
     name: Production readiness (all four hosts)
     if: always()
-    needs: [verify, windows-compiler-acceptance, native-dependencies, build, smoke, windows-builder-acceptance]
+    needs:
+      - verify
+      - windows-compiler-acceptance
+      - build-linux
+      - build-windows
+      - build-macos-arm64
+      - build-macos-x86_64
+      - browser
+      - linux-fixture-linux
+      - smoke-linux
+      - linux-fixture-windows
+      - smoke-windows
+      - linux-fixture-macos-arm64
+      - smoke-macos-arm64
+      - linux-fixture-macos-x86_64
+      - smoke-macos-x86_64
+      - windows-recipient-linux
+      - windows-recipient-macos-arm64
+      - windows-recipient-macos-x86_64
     runs-on: ubuntu-22.04
     steps:
       - name: Require every production build and acceptance matrix to succeed
         env:
           RESULTS: ${{ toJSON(needs) }}
         run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
-
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [production-ready]
+    needs:
+      - production-ready
     runs-on: ubuntu-22.04
     permissions:
       contents: write

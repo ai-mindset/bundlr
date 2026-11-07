@@ -1,4 +1,11 @@
 import from src.domain.request { PYTHON_VERSION, PYTHON_BUILD, supported_target }
+import hashlib;
+
+def:pub runtime_cache_name(url: str, checksum: str) -> str {
+    # A warm cache must not hide an inconsistent version/build/platform pin edit.
+    identity = url + "\n" + checksum;
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest() + ".tar.gz";
+}
 
 obj:pub PythonDistribution {
     has target: str,

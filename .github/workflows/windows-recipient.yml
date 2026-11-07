@@ -1,0 +1,29 @@
+name: Run Windows-built Unix application acceptance
+'on':
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      runner:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  consume:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: windows-built-${{ inputs.target }}
+          path: applications
+      - uses: actions/download-artifact@v7
+        with:
+          name: tests-${{ inputs.target }}
+          path: test-download
+      - name: Launch Windows-built PyPI and Git applications after native tar extraction
+        run: |
+          mkdir tests
+          tar -xzf test-download/tests-${{ inputs.target }}.tar.gz -C tests
+          ./tests/acceptance-test consume applications .build/windows-recipient
