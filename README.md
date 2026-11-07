@@ -125,7 +125,7 @@ HTTPS downloads. uv uses its own documented certificate/proxy configuration.
 
 ## Development
 
-Use Jac **0.39.0**, CMake 3.25+, a native C toolchain, Git and the platform SDK.
+Use Jac **0.39.1**, CMake 3.25+, a native C toolchain, Git and the platform SDK.
 Linux builds also require `patchelf`, autotools and Ninja. Install the pinned Jac
 version using the [official installer](https://jaclang.org/docs/latest/quick-guide/install).
 Application source and developer helpers are Jac; helpers run in the developer's
@@ -154,10 +154,24 @@ Native builds reject Python fallback. No registry JavaScript dependencies are ne
 `--native-libs PATH --target TARGET` consumes a dependency bundle produced on that
 target. Its target, baseline and hashes must match. This permits Windows native
 cross-compilation from Linux. The dependency bundle must preserve relative symlinks.
-macOS releases compile on an ARM Mac using Jac 0.39.0. The Intel release uses
+macOS releases compile on an ARM Mac using Jac 0.39.1. The Intel release uses
 `--target-triple x86_64-apple-darwin` and libraries built on Intel macOS; both Mac
 architectures retain the library-path audit. Native acceptance runs on each target
 architecture, including Intel macOS, without requiring a Jac compiler there.
+
+Windows compilation requires an isolated compiler cache: set `JAC_CACHE_HOME`
+to an absolute build directory, as CI does with `.build/jac-cache`.
+`scripts/build.jac` and `scripts/test.jac` prepare that compiler's native regex
+runtime before compiling Windows. Jac 0.39.1 otherwise imports POSIX `sched_yield`
+from Windows UCRT and fails at startup with `0xC0000139`. The checksum-guarded
+`scripts/prepare_jac.jac` uses Kernel32 `SwitchToThread` for Windows builds and
+restores the original POSIX sources before Unix builds. It retains the atomic
+cache lock and accepts only the pinned upstream files or the same patch already
+applied. For a direct Windows
+`jac build`, first run `jac run scripts/prepare_jac.jac --target windows-x86_64`
+in the same cache. Before directly compiling a Unix target in that cache, run the
+preparation helper with that target instead. Use separate caches for concurrent
+builds of different targets.
 
 `--development-libs PATH` permits local shared libraries for diagnosis. Its outputs
 are named `bundlr-dev-*` and are never release evidence. `--prepared-uv` reuses

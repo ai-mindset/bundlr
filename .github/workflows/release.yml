@@ -15,7 +15,8 @@ permissions:
   contents: read
 
 env:
-  JAC_VERSION: 0.39.0
+  JAC_VERSION: 0.39.1
+  JAC_CACHE_HOME: ${{ github.workspace }}/.build/jac-cache
   VCPKG_BASELINE: 9eec002df1cd109f8f104cd966a763daf9751489
 
 jobs:
@@ -36,7 +37,9 @@ jobs:
       - run: jac check src scripts tests ui
       - run: jac run scripts/build_ui.jac .build/ui
       - name: Compile Windows compiler acceptance
-        run: jac build --native tests/compiler_probe.jac --target-triple x86_64-pc-windows-msvc -o .build/windows-compiler-probe.exe
+        run: |
+          jac run scripts/prepare_jac.jac --target windows-x86_64
+          jac build --native tests/compiler_probe.jac --target-triple x86_64-pc-windows-msvc -o .build/windows-compiler-probe.exe
       - uses: actions/upload-artifact@v4
         with:
           name: windows-compiler-probe
@@ -128,8 +131,6 @@ jobs:
 
   build:
     needs: native-dependencies
-    env:
-      JAC_CACHE_HOME: ${{ github.workspace }}/.build/jac-cache
     strategy:
       fail-fast: false
       matrix:
@@ -140,7 +141,7 @@ jobs:
             target: windows-x86_64
           - runner: macos-15
             target: macos-arm64
-          # Jac 0.39.0 ships an ARM compiler; Intel execution is checked in smoke.
+          # Jac 0.39.1 ships an ARM compiler; Intel execution is checked in smoke.
           - runner: macos-15
             target: macos-x86_64
     runs-on: ${{ matrix.runner }}

@@ -17,6 +17,7 @@ import zipfile;
 import from pathlib { Path }
 import from scripts.prepare_uv { host_target, prepare_uv, uv_pins, download_bytes }
 import from scripts.build_ui { build_ui }
+import from scripts.prepare_jac { prepare_native_runtime }
 
 glob ROOT: Path = Path.cwd();
 
@@ -124,6 +125,7 @@ def:pub copy_libraries(
 }
 
 def:pub compile_native(source: str, binary: Path, target: str) {
+    prepare_native_runtime(target);
     triples = {
         "linux-x86_64": "x86_64-unknown-linux-gnu",
         "windows-x86_64": "x86_64-pc-windows-msvc",

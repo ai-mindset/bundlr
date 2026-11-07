@@ -2,11 +2,13 @@
 import hashlib;
 import json;
 import os;
+import jaclang;
 import subprocess;
 import tempfile;
 import from pathlib { Path }
 import from unittest.mock { patch }
 import from scripts.build { audit_runtime, copy_libraries }
+import from scripts.prepare_jac { patch_windows_regex, prepare_native_runtime }
 
 def:pub check_tooling {
     lock = json.loads(Path("build-lock.json").read_text()) as dict[str, object];
@@ -53,7 +55,71 @@ def:pub check_tooling {
     );
     assert "--target TARGET" in help;
     check_macos_audit();
-    print("Developer helper reuse, preparation CLI and macOS audit contracts passed.");
+    check_windows_regex_patch();
+    print(
+        "Developer helper reuse, preparation CLI, macOS audit and compiler patch contracts passed."
+    );
+}
+
+def check_windows_regex_patch {
+    package = Path(jaclang.__file__).resolve().parent;
+    names = ["re.jac", "impl/re.impl.jac"];
+    originals: dict[str, bytes] = {};
+    for name in names {
+        content = (package / "runtime/na_stdlib" / name).read_bytes();
+        # Tests accept both the pristine compiler and a prepared build cache.
+        originals[name] = content.replace(
+            b"import from kernel32 { def SwitchToThread -> i32;  }",
+            b"import from c { def sched_yield -> i32;  }"
+        ).replace(
+            b"        SwitchToThread();", b"        sched_yield();"
+        );
+    }
+    with tempfile.TemporaryDirectory(prefix="bundlr-compiler-patch-") as temporary {
+        base = Path(temporary);
+        for name in names {
+            path = base / "runtime/na_stdlib" / name;
+            path.parent.mkdir(parents=True, exist_ok=True);
+            path.write_bytes(originals[name]);
+        }
+        patch_windows_regex(base);
+        patched = [(base / "runtime/na_stdlib" / name).read_bytes() for name in names];
+        assert b"SwitchToThread();" in patched[1];
+        assert b"sched_yield" not in b"".join(patched);
+        # Switching back to Unix restores the exact upstream bytes.
+        patch_windows_regex(base, False);
+        assert [(base / "runtime/na_stdlib" / name).read_bytes() for name in names]
+            == [originals[name] for name in names];
+        patch_windows_regex(base);
+        # Repeated preparation and recovery from a partially applied patch.
+        patch_windows_regex(base);
+        (base / "runtime/na_stdlib/re.jac").write_bytes(originals["re.jac"]);
+        patch_windows_regex(base);
+        assert [(base / "runtime/na_stdlib" / name).read_bytes() for name in names]
+            == patched;
+        # Recover an interrupted restoration, where only the declaration was
+        # restored, through the same entry point used by every native build.
+        (base / "runtime/na_stdlib/re.jac").write_bytes(originals["re.jac"]);
+        with patch.object(jaclang, "__file__", str(base / "__init__.py")), patch.dict(
+            os.environ, {"JAC_CACHE_HOME": str(base)}
+        ) {
+            prepare_native_runtime("linux-x86_64");
+        }
+        assert [(base / "runtime/na_stdlib" / name).read_bytes() for name in names]
+            == [originals[name] for name in names];
+        # An unknown second file must fail before the first file is patched.
+        declaration = base / "runtime/na_stdlib/re.jac";
+        declaration.write_bytes(originals["re.jac"]);
+        (base / "runtime/na_stdlib/impl/re.impl.jac").write_bytes(b"unknown runtime");
+        rejected = False;
+        try {
+            patch_windows_regex(base);
+        } except RuntimeError {
+            rejected = True;
+        }
+        assert rejected;
+        assert declaration.read_bytes() == originals["re.jac"];
+    }
 }
 
 def check_macos_audit {
