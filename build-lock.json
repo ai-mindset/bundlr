@@ -1,0 +1,13 @@
+{
+  "jacVersion": "0.39.1",
+  "vcpkgBaseline": "9eec002df1cd109f8f104cd966a763daf9751489",
+  "maximumArtifactBytes": 52428800,
+  "llhttpVersion": "9.2.1",
+  "acceptance": {
+    "blackVersion": "26.5.1",
+    "packagingVersion": "24.2",
+    "coloramaVersion": "0.4.6"
+  },
+  "caBundleWheelUrl": "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl",
+  "caBundleWheelSha256": "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1"
+}
