@@ -110,7 +110,7 @@ jobs:
           NATIVE_CACHE_HIT: ${{ steps.native-cache.outputs.cache-hit }}
           LEGACY_CACHE_HIT: ${{ steps.legacy-native-cache.outputs.cache-hit }}
         run: |
-          printf 'Native cache hit: `%s`; legacy cache hit: `%s`\n\n' "$NATIVE_CACHE_HIT" "$LEGACY_CACHE_HIT" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Native cache hit: %s; legacy cache hit: %s\n\n' "$NATIVE_CACHE_HIT" "$LEGACY_CACHE_HIT" >> "$GITHUB_STEP_SUMMARY"
           du -h native-${{ inputs.target }}.tar.gz >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -168,7 +168,7 @@ jobs:
         env:
           JAC_CACHE_HIT: ${{ steps.jac-cache.outputs.cache-hit }}
         run: |
-          printf 'Jac compilation cache hit: `%s`\n\n' "$JAC_CACHE_HIT" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Jac compilation cache hit: %s\n\n' "$JAC_CACHE_HIT" >> "$GITHUB_STEP_SUMMARY"
           for directory in "$JAC_CACHE_HOME/jir" .jac/cache; do
             if [ -d "$directory" ]; then
               du -sh "$directory" >> "$GITHUB_STEP_SUMMARY"

@@ -3,7 +3,7 @@ name = "bundlr"
 version = "0.2.0-dev"
 jac-version = "0.39.1"
 entry-point = "src.main"
-kind = "cli-native"
+kind = "native-binary"
 
 [placement]
 default = "native"

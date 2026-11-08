@@ -1,0 +1,9 @@
+# Local build caches and developer state are not application sources.
+.build/
+.agents/
+.aws/
+.codex/
+.gstack/
+
+# Legacy local Unix socket; keep it out of Jac's sealed image.
+bundlr

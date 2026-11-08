@@ -1,6 +1,7 @@
 """Build contract tests with the release's native libraries, then run on the host."""
 import argparse;
 import json;
+import os;
 import shutil;
 import subprocess;
 import tempfile;
@@ -45,6 +46,38 @@ with entry:__main__ {
             subprocess.run(
                 [str(output / ("native-test" + suffix)), directory], check=True
             );
+        }
+        if not args.development_libs {
+            with tempfile.TemporaryDirectory(
+                prefix="bundlr-developer-test-"
+            ) as directory {
+                subprocess.run(
+                    [
+                        "jac",
+                        "run",
+                        "scripts/build_dev.jac",
+                        "--native-libs",
+                        args.native_libs,
+                        "--prepared-uv",
+                        "--output",
+                        directory
+                    ],
+                    check=True
+                );
+                # Exercise the produced runtime, not just compiler exit status.
+                binary = str(Path(directory) / ("main" + suffix));
+                environment = dict(
+                    os.environ,
+                    PATH="",
+                    BUNDLR_CACHE_DIRECTORY=str(Path(directory) / "tool-cache")
+                );
+                environment.pop("BUNDLR_UV_EXECUTABLE", None);
+                for option in ["--help", "--diagnose"] {
+                    subprocess.run(
+                        [binary, option], cwd=directory, env=environment, check=True
+                    );
+                }
+            }
         }
     }
 }

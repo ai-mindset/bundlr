@@ -117,7 +117,7 @@ if corrupt. uv uses its own certificate and proxy configuration.
 ## Development
 
 Requires CMake **3.25+**, Git, a native C/C++ toolchain, Ninja, patchelf, autotools
-and Chrome.
+and Chrome for browser tests.
 From the repository root on Linux, install the pinned Jac and run all checks:
 
 ```sh
@@ -142,6 +142,17 @@ BUILD
 Each run uses a fresh output directory because completed releases are never
 overwritten. The helper builds pinned vcpkg dependencies; `jac test` runs native
 contracts against them. Browser smoke tests require Chrome and loopback access.
+
+For a reusable local workspace after setup:
+
+```sh
+jac run scripts/build_dev.jac
+./dist/main --help
+```
+
+The helper stages libraries, UI and verified uv, then compiles and tests the
+executable. On Linux it uses system certificates. Plain `jac build` only
+recompiles; portable releases use `scripts/build.jac` with pinned certificates.
 
 For cross-builds, pass `--target TARGET --native-libs PATH` with that target's CI
 dependency bundle. Set `BUNDLR_TEST_TARGET` and `BUNDLR_TEST_NATIVE_LIBS` to match

@@ -4,10 +4,13 @@ import json;
 import os;
 import jaclang;
 import jaclang.cli.browser_engine as browser_engine;
+import jaclang.dist.seal as seal;
 import subprocess;
 import tempfile;
 import from pathlib { Path }
 import from unittest.mock { MagicMock, patch }
+import from jaclang.project.config { get_config }
+import from jaclang.project.kinds { plan_app_run }
 import from scripts.build { audit_runtime, copy_libraries }
 import from scripts.prepare_jac {
     patch_windows_regex,
@@ -61,6 +64,8 @@ def:pub check_tooling {
         ["jac", "run", "scripts/prepare_uv.jac", "--", "--help"], text=True
     );
     assert "--target TARGET" in help;
+    check_native_build_plan();
+    check_seal_exclusions();
     check_macos_audit();
     check_linux_audit();
     check_browser_errors();
@@ -69,6 +74,56 @@ def:pub check_tooling {
     print(
         "Developer helpers, platform audits, browser diagnostics and compiler patch contracts passed."
     );
+}
+
+def check_native_build_plan {
+    config = get_config(start_path=Path.cwd(), force_discover=True);
+    assert config is not None;
+    plan = plan_app_run(config, str(config.project_root), config.resolve_app(""));
+    assert plan.verb == "native" , "jac build must compile the native entry, not seal it.";
+    assert Path(plan.entry_path).resolve() == Path("src/main.jac").resolve();
+}
+
+def check_seal_exclusions {
+    ignore = Path(".jacignore");
+    with tempfile.TemporaryDirectory(prefix="bundlr-seal-test-") as temporary {
+        base = Path(temporary);
+        source = base / "project";
+        source.mkdir();
+        (source / ".jacignore").write_text(
+            ignore.read_text() if ignore.is_file() else ""
+        );
+        local_files = [
+            "bundlr",
+            ".build/generated.jac",
+            ".agents/local.jac",
+            ".aws/credentials",
+            ".codex/config.toml",
+            ".gstack/state.json"
+        ];
+        for name in ["src/main.jac", "ui/main.jac"] + local_files {
+            path = source / name;
+            path.parent.mkdir(parents=True, exist_ok=True);
+            path.write_text("fixture");
+        }
+        # Exercise Jac's real staging filter and copy; skip compilation only.
+        with patch.object(seal, "sealed_image_key", return_value=""), patch.object(
+            seal, "vendor_packages"
+        ), patch.object(seal, "bake_serve_payloads", return_value=True), patch.object(
+            seal, "bake_native_payloads", return_value=True
+        ), patch.object(seal, "run_precompiler", return_value=0) {
+            image = seal.make_sealed_image(
+                MagicMock(project_root=source), base / "output", "bundlr"
+            );
+        }
+        assert image is not None;
+        for name in local_files {
+            assert not (image / name).exists() , "Local file entered seal: " + name;
+        }
+        for name in ["src/main.jac", "ui/main.jac"] {
+            assert (image / name).read_text() == "fixture";
+        }
+    }
 }
 
 def check_windows_regex_patch {

@@ -338,6 +338,33 @@ def publish_directory(source: Path, destination: Path) {
     }
 }
 
+def:pub prepare_resources(
+    portable: Path, uv_binary: Path, lock: dict[str, object], development: bool
+) {
+    data = portable / "data";
+    build_ui(data);
+    prepare_ca(portable, lock, development);
+    (data / "uv.gz").write_bytes(
+        gzip.compress(uv_binary.read_bytes(), compresslevel=9, mtime=0)
+    );
+    shutil.copy2(ROOT / "LICENSE", portable / "LICENSE");
+    shutil.copytree(
+        ROOT / "vendor/licenses", portable / "licenses/compiler", dirs_exist_ok=True
+    );
+    for licence in ["LICENSE-MIT", "LICENSE-APACHE", "provenance.json"] {
+        path = ROOT / "vendor/uv" / licence;
+        if path.exists() {
+            uv_licences = portable / "licenses/uv";
+            uv_licences.mkdir(parents=True, exist_ok=True);
+            shutil.copy2(path, uv_licences / licence);
+        } elif not development {
+            raise RuntimeError(
+                "Verified uv provenance/licences are missing; prepare uv again."
+            );
+        }
+    }
+}
+
 def:pub build(args: argparse.Namespace) {
     lock = json.loads((ROOT / "build-lock.json").read_text()) as dict[str, object];
     compiler = shutil.which("jac");
@@ -385,26 +412,7 @@ def:pub build(args: argparse.Namespace) {
         portable = staging / name;
         portable.mkdir();
         copy_libraries(dependencies, portable, lock, development, target);
-        data = portable / "data";
-        build_ui(data);
-        prepare_ca(portable, lock, development);
-        (data / "uv.gz").write_bytes(
-            gzip.compress(uv_binary.read_bytes(), compresslevel=9, mtime=0)
-        );
-        shutil.copy2(ROOT / "LICENSE", portable / "LICENSE");
-        shutil.copytree(ROOT / "vendor/licenses", portable / "licenses/compiler");
-        for licence in ["LICENSE-MIT", "LICENSE-APACHE", "provenance.json"] {
-            path = ROOT / "vendor/uv" / licence;
-            if path.exists() {
-                uv_licences = portable / "licenses/uv";
-                uv_licences.mkdir(parents=True, exist_ok=True);
-                shutil.copy2(path, uv_licences / licence);
-            } elif not development {
-                raise RuntimeError(
-                    "Verified uv provenance/licences are missing; prepare uv again."
-                );
-            }
-        }
+        prepare_resources(portable, uv_binary, lock, development);
         binary = portable / ("bundlr.exe" if target == "windows-x86_64" else "bundlr");
         compile_native("src/main.jac", binary, target);
         if target == "windows-x86_64" {
