@@ -3,12 +3,19 @@ import hashlib;
 import json;
 import os;
 import jaclang;
+import jaclang.cli.browser_engine as browser_engine;
 import subprocess;
 import tempfile;
 import from pathlib { Path }
-import from unittest.mock { patch }
+import from unittest.mock { MagicMock, patch }
 import from scripts.build { audit_runtime, copy_libraries }
-import from scripts.prepare_jac { patch_windows_regex, prepare_native_runtime }
+import from scripts.prepare_jac {
+    patch_windows_regex,
+    prepare_native_runtime,
+    launch_browser,
+    prepare_browser_runtime
+}
+import from scripts.smoke { browse, browser_acceptance }
 
 def:pub check_tooling {
     lock = json.loads(Path("build-lock.json").read_text()) as dict[str, object];
@@ -55,9 +62,12 @@ def:pub check_tooling {
     );
     assert "--target TARGET" in help;
     check_macos_audit();
+    check_linux_audit();
+    check_browser_errors();
+    check_browser_startup();
     check_windows_regex_patch();
     print(
-        "Developer helper reuse, preparation CLI, macOS audit and compiler patch contracts passed."
+        "Developer helpers, platform audits, browser diagnostics and compiler patch contracts passed."
     );
 }
 
@@ -147,6 +157,179 @@ def check_macos_audit {
             assert rejected != valid;
         }
     }
+}
+
+def check_linux_audit {
+    with tempfile.TemporaryDirectory(prefix="bundlr-linux-audit-") as temporary {
+        directory = Path(temporary);
+        (directory / "bundlr").write_bytes(b"synthetic ELF fixture");
+        (directory / "libtest.so").write_bytes(b"synthetic ELF library");
+        for name in ["bundlr", "libtest.so"] {
+            for (version, valid) in [
+                ("2.2.5", True),
+                ("2.9", True),
+                ("2.35", True),
+                ("2.36", False),
+                ("2.100", False),
+                ("PRIVATE", False),
+                ("ABI_DT_RELR", False)
+            ] {
+                def output(args: list[str], text: bool = True) -> str {
+                    assert text;
+                    if args[0] == "readelf" {
+                        return "Name: GLIBC_"
+                            + (version if Path(args[2]).name == name else "2.34");
+                    }
+                    assert args[0] == "ldd";
+                    return "libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x0)\n";
+                }
+                rejected = False;
+                with patch("platform.system", return_value="Linux"), patch(
+                    "platform.machine", return_value="x86_64"
+                ), patch("subprocess.check_output", side_effect=output) {
+                    try {
+                        audit_runtime(directory, "linux-x86_64");
+                    } except RuntimeError {
+                        rejected = True;
+                    }
+                }
+                assert rejected != valid , name + ": GLIBC_" + version;
+            }
+        }
+    }
+}
+
+def check_browser_errors {
+    result = subprocess.CompletedProcess(
+        args=["jac", "browse"],
+        returncode=1,
+        stdout="browser stdout",
+        stderr="Chrome startup failed"
+    );
+    with patch("subprocess.run", return_value=result) {
+        rejected = False;
+        try {
+            browse(["open", "http://127.0.0.1:1234"]);
+        } except RuntimeError as error {
+            rejected = True;
+            assert "browser stdout" in str(error);
+            assert "Chrome startup failed" in str(error);
+        }
+        assert rejected;
+    }
+    # A second failure during cleanup must preserve the original startup error.
+    with patch(
+        "subprocess.run",
+        side_effect=[
+            subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="original browser failure", stderr=""
+            ),
+            subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="cleanup failure", stderr=""
+            )
+        ]
+    ) {
+        rejected = False;
+        try {
+            browser_acceptance(
+                "http://127.0.0.1:1234",
+                Path("unused"),
+                MagicMock(spec=subprocess.Popen) as subprocess.Popen[bytes]
+            );
+        } except RuntimeError as error {
+            rejected = True;
+            assert "original browser failure" in str(error) , str(error);
+            assert "cleanup failure" not in str(error);
+        }
+        assert rejected;
+    }
+}
+
+def check_browser_startup {
+    source = (
+        Path(jaclang.__file__).resolve().parent / "cli/impl/browser_engine.impl.jac"
+    ).read_bytes();
+    original = browser_engine.launch;
+    with patch.object(browser_engine, "launch", original), patch(
+        "pathlib.Path.read_bytes", return_value=source + b"\n# unknown revision\n"
+    ) {
+        rejected = False;
+        try {
+            prepare_browser_runtime();
+        } except RuntimeError {
+            rejected = True;
+        }
+        assert rejected;
+        assert browser_engine.launch is original;
+    }
+    # Every filesystem/process operation below is mocked. Chrome publishes
+    # readiness inside Popen, forcing the scheduling order that exposed the race.
+    for (enabled, publishes) in [(False, True), (True, True), (True, False)] {
+        candidate = launch_browser if enabled else original;
+        ready = {"exists": False};
+        cache = MagicMock();
+        port_file = cache.__truediv__.return_value.__truediv__.return_value;
+        def ready_exists -> bool {
+            return ready["exists"];
+        }
+        port_file.exists.side_effect = ready_exists;
+        port_file.read_text.return_value = "9222\n/devtools/browser/fixture\n";
+        def unlink(missing_ok: bool = False) {
+            assert missing_ok;
+            ready["exists"] = False;
+        }
+        port_file.unlink.side_effect = unlink;
+        process = MagicMock(pid=123);
+        def create_chrome(command: list[str], stdout: int, stderr: int) -> MagicMock {
+            assert "--remote-debugging-port=0" in command;
+            assert stdout == -3 and stderr == -3;
+            ready["exists"] = publishes;
+            return process;
+        }
+        with patch.multiple(
+            browser_engine,
+            load_state=MagicMock(return_value=None),
+            get_cache_dir=MagicMock(return_value=cache),
+            _find_chrome=MagicMock(return_value="/memory/chrome"),
+            _calibrate_viewport=MagicMock(),
+            _state_path=MagicMock()
+        ), patch("subprocess.Popen", side_effect=create_chrome), patch("time.sleep") {
+            rejected = False;
+            try {
+                result = candidate("fixture");
+                assert result["port"] == 9222;
+            } except RuntimeError as error {
+                rejected = True;
+                assert str(error) == "Chrome failed to start (no DevToolsActivePort)";
+            }
+            assert rejected == (not enabled or not publishes);
+            assert process.kill.called == rejected;
+            if enabled and publishes {
+                # Exercise the actual CLI command's global launch lookup, too.
+                with patch.object(browser_engine, "launch", original) {
+                    prepare_browser_runtime();
+                    assert browser_engine.launch is launch_browser;
+                    prepare_browser_runtime();
+                    assert browser_engine.cmd_open("fixture", None)
+                        == "browser ready (about:blank)";
+                }
+            }
+        }
+    }
+    state = {"session": "fixture", "pid": 123, "port": 9222};
+    with patch.multiple(
+        browser_engine,
+        load_state=MagicMock(return_value=state),
+        _pid_alive=MagicMock(return_value=True),
+        _http_json=MagicMock()
+    ), patch("subprocess.Popen") as popen {
+        assert launch_browser("fixture") == state;
+        popen.assert_not_called();
+    }
+    assert (
+        Path(jaclang.__file__).resolve().parent / "cli/impl/browser_engine.impl.jac"
+    ).read_bytes()
+        == source;
 }
 
 with entry:__main__ {

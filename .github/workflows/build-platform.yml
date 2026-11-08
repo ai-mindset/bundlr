@@ -30,10 +30,24 @@ jobs:
   native-dependencies:
     runs-on: ${{ inputs.dependency-runner }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: inputs.target == 'windows-x86_64'
+        with:
+          name: windows-compiler-probe
+          path: compiler-probe
+      - name: Run Windows compiler acceptance before native dependency builds
+        if: inputs.target == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          & ./compiler-probe/windows-compiler-probe.exe
+          $compilerExitCode = $LASTEXITCODE
+          if ($compilerExitCode -ne 0) {
+            throw ("Windows compiler runtime failed with exit code {0} (0x{0:X8})" -f $compilerExitCode)
+          }
       - name: Restore pinned native bundle
         id: native-cache
-        uses: actions/cache@v5
+        uses: actions/cache@a7833574556fa59680c1b7cb190c1735db73ebf0 # v5.0.0
         with:
           path: native-${{ inputs.target }}.tar.gz
           # Only native build inputs and the checked baseline affect this bundle.
@@ -41,11 +55,11 @@ jobs:
       - name: Reuse an identical bundle from the previous cache key
         id: legacy-native-cache
         if: steps.native-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@a7833574556fa59680c1b7cb190c1735db73ebf0 # v5.0.0
         with:
           path: native-${{ inputs.target }}.tar.gz
           key: native-v1-${{ inputs.dependency-runner }}-${{ inputs.target }}-${{ inputs.triplet }}-${{ hashFiles('build-lock.json', 'vcpkg.json', 'native/**', 'scripts/triplets/**') }}
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         if: steps.native-cache.outputs.cache-hit != 'true' && steps.legacy-native-cache.outputs.cache-hit != 'true'
         with:
           repository: microsoft/vcpkg
@@ -90,7 +104,15 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=${{ inputs.triplet }}
           cmake --build .build/native --config Release
           tar -czf native-${{ inputs.target }}.tar.gz -C .build/native/portable-libs .
-      - uses: actions/upload-artifact@v6
+      - name: Report native cache reuse and bundle size
+        shell: bash
+        env:
+          NATIVE_CACHE_HIT: ${{ steps.native-cache.outputs.cache-hit }}
+          LEGACY_CACHE_HIT: ${{ steps.legacy-native-cache.outputs.cache-hit }}
+        run: |
+          printf 'Native cache hit: `%s`; legacy cache hit: `%s`\n\n' "$NATIVE_CACHE_HIT" "$LEGACY_CACHE_HIT" >> "$GITHUB_STEP_SUMMARY"
+          du -h native-${{ inputs.target }}.tar.gz >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: native-${{ inputs.target }}
           path: native-${{ inputs.target }}.tar.gz
@@ -100,15 +122,11 @@ jobs:
     needs: native-dependencies
     runs-on: ${{ inputs.build-runner }}
     steps:
-      - uses: actions/checkout@v6
-      - name: Install pinned Jac
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o /tmp/install-jac.sh
-          bash /tmp/install-jac.sh --version "$JAC_VERSION"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@v7
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: ./.github/actions/setup-jac
+        with:
+          version: ${{ env.JAC_VERSION }}
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: native-${{ inputs.target }}
           path: .build/download
@@ -123,7 +141,7 @@ jobs:
         run: jac run scripts/stamp_version.jac
       - name: Restore Jac compilation cache
         id: jac-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@a7833574556fa59680c1b7cb190c1735db73ebf0 # v5.0.0
         with:
           path: |
             ${{ env.JAC_CACHE_HOME }}/jir
@@ -139,21 +157,32 @@ jobs:
         run: jac test
       - name: Save successful Jac compilation
         if: steps.jac-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@a7833574556fa59680c1b7cb190c1735db73ebf0 # v5.0.0
         with:
           path: |
             ${{ env.JAC_CACHE_HOME }}/jir
             .jac/cache
           key: ${{ steps.jac-cache.outputs.cache-primary-key }}
+      - name: Report compilation cache reuse
+        shell: bash
+        env:
+          JAC_CACHE_HIT: ${{ steps.jac-cache.outputs.cache-hit }}
+        run: |
+          printf 'Jac compilation cache hit: `%s`\n\n' "$JAC_CACHE_HIT" >> "$GITHUB_STEP_SUMMARY"
+          for directory in "$JAC_CACHE_HOME/jir" .jac/cache; do
+            if [ -d "$directory" ]; then
+              du -sh "$directory" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
       - name: Stage native tests for target-host smoke tests
         run: tar -czf tests-${{ inputs.target }}.tar.gz -C .build/tests .
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: tests-${{ inputs.target }}
           path: tests-${{ inputs.target }}.tar.gz
           if-no-files-found: error
           compression-level: 0
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: bundlr-${{ inputs.target }}
           path: |

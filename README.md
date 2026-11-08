@@ -1,24 +1,70 @@
 # Bundlr 📦
 
-Bundlr packages a pinned PyPI requirement or HTTPS Git project into a self-contained
+Package a pinned PyPI requirement or HTTPS Git project into a self-contained
 Python application for Linux x64, Windows x64, or macOS ARM64/x64. Recipients need
-no Python, Jac, uv, or Bundlr installation.
+no Python, Jac, uv, or Bundlr installation. Written in [Jac](https://jaclang.org),
+with a native CLI and a local browser UI.
 
-Written in [Jac](https://jaclang.org), with a native CLI and a local browser UI
-sharing one streamed, cancellable packaging engine. Bundled Python: **3.12.13**.
+Bundled Python: **3.12.13**. Requires glibc **2.35+** on Linux or macOS **13.0+**.
 
 ## Usage
 
-Download the release for your **builder** platform, verify its `.sha256`, and
-extract the complete directory. Run `bundlr` (`bundlr.exe` on Windows) without
-arguments to open the browser UI. Use **Quit Bundlr** to stop it.
+Download your **builder** platform's archive and matching `.sha256` from
+[Releases](https://github.com/ai-mindset/bundlr/releases/latest). From the download
+directory, copy the commands for your platform:
+
+<details>
+<summary>Linux x64</summary>
 
 ```sh
+sha256sum --check bundlr-linux-x86_64.tar.gz.sha256 && \
+tar -xzf bundlr-linux-x86_64.tar.gz && \
+cd bundlr-linux-x86_64 && \
 ./bundlr --diagnose
+```
+
+</details>
+
+<details>
+<summary>macOS (Apple Silicon or Intel)</summary>
+
+```sh
+target="macos-$(uname -m)"
+shasum -a 256 --check "bundlr-$target.tar.gz.sha256" && \
+tar -xzf "bundlr-$target.tar.gz" && \
+cd "bundlr-$target" && \
+./bundlr --diagnose
+```
+
+</details>
+
+<details>
+<summary>Windows x64 (PowerShell)</summary>
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$archive = 'bundlr-windows-x86_64.zip'
+$expected = (Get-Content "$archive.sha256").Split()[0]
+if ((Get-FileHash $archive -Algorithm SHA256).Hash -ine $expected) { throw 'Checksum mismatch' }
+Expand-Archive $archive .
+Set-Location bundlr-windows-x86_64
+./bundlr.exe --diagnose
+if ($LASTEXITCODE -ne 0) { throw 'Bundlr diagnostic failed' }
+./bundlr.exe --command black --target all "black==26.5.1"
+```
+
+</details>
+
+Linux/macOS examples, from the extracted directory:
+
+```sh
+./bundlr                       # Browser UI; use Quit Bundlr to stop
 ./bundlr --command black --target all "black==26.5.1"
 ./bundlr --name PipUI --command pip-ui --kind windowed \
   --target windows-x86_64 --output dist/pipui-0.2.0 "pip-ui-tkinter==0.2.0"
 ```
+
+On Windows, run `./bundlr.exe` without arguments for the browser UI.
 
 Sources must be `name[extras]==version` or an HTTPS Git URL. Git URLs accept
 `git+`, `@revision`, and `#subdirectory=...`; use a full commit for reproducibility.
@@ -39,33 +85,22 @@ Deliver the archive and its checksum, and extract the entire application before
 launching. Use archives for Unix targets built on Windows or case-insensitive
 volumes so target paths, symlinks, and permission metadata reach the recipient.
 
-## Packaging guarantees
+## Guarantees and support
 
 - Python and uv downloads are SHA-256 verified; cached bytes are checked before use.
 - Target dependencies require compatible wheels. Git root wheels must be pure
-  Python with portable tags; foreign target executables are never run during packaging.
+  Python with portable tags; packaging never runs foreign target executables.
 - Launchers use bundled Python with `-I -B`, independently of the builder's Python.
 - Completed directories, archives, and checksums are never overwritten. Use a new
   output directory for subsequent builds.
 - The native executable and complete compressed Bundlr release must each stay
   below **50 MiB**. Releases include a `.size.json` report.
 
-## Verification and support
-
-Verify archives with `sha256sum --check FILE.sha256` on Linux,
-`shasum -a 256 --check FILE.sha256` on macOS, or compare `Get-FileHash` output with
-its checksum file on Windows.
-
-Each application includes these files at its root, or in `Contents/Resources` on macOS:
-
-- `bundlr-manifest.json`: application, source, entry point, target, and version identity.
-- `bundlr-dependencies.json`: installed distribution names and versions.
-- `THIRD_PARTY_LICENSES.txt`: runtime and distribution licence notices.
-- `SHA256SUMS`: sorted regular-file hashes relative to that directory, excluding itself.
-
-The archive checksum covers the complete application. These records are not
+Applications include `bundlr-manifest.json`, `bundlr-dependencies.json`,
+`THIRD_PARTY_LICENSES.txt`, and `SHA256SUMS` at their root (`Contents/Resources`
+on macOS). Archive checksums cover the complete application; these records are not
 signatures or vulnerability assessments. See [IT_SUPPORT_REPORT.md](IT_SUPPORT_REPORT.md)
-for deployment evidence and clean-device acceptance.
+for their meaning and deployment checks.
 
 ## Configuration
 
@@ -76,46 +111,44 @@ for deployment evidence and clean-device acceptance.
 | `BUNDLR_UV_EXECUTABLE` | Use a host uv binary matching the compiled checksum. |
 | `BUNDLR_CA_BUNDLE` | Select a CA bundle for Bundlr's HTTPS downloads. |
 
-Python archives are keyed by URL and pinned SHA-256. Every reuse is verified;
-corrupt entries are downloaded again, and partial downloads are removed on failure
-or cancellation. uv uses its own certificate and proxy configuration.
+Python archives are cached by URL and SHA-256, verified on reuse, and repaired
+if corrupt. uv uses its own certificate and proxy configuration.
 
 ## Development
 
-Requires **Jac 0.39.1**, CMake 3.25+, Git, a native C toolchain, and the platform SDK.
-Linux also needs Ninja, patchelf, and autotools. Install Jac using the
-[official installer](https://jaclang.org/docs/latest/quick-guide/install).
-
-From the repository root on Linux:
+Requires CMake **3.25+**, Git, a native C/C++ toolchain, Ninja, patchelf, autotools
+and Chrome.
+From the repository root on Linux, install the pinned Jac and run all checks:
 
 ```sh
+bash <<'BUILD'
+set -euo pipefail
+curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash -s -- --version 0.39.1
+export PATH="$HOME/.local/bin:$PATH"
 export JAC_CACHE_HOME="$PWD/.build/jac-cache"
+mkdir -p .build
+release_dir="$(mktemp -d "$PWD/.build/release-XXXXXXXX")"
 jac run scripts/prepare_uv.jac --target linux-x86_64
 jac fmt --check src scripts tests ui
 jac check src scripts tests ui --lint
 jac check src scripts tests ui
-jac run scripts/build.jac --prepared-uv
+jac run scripts/build.jac --prepared-uv --output "$release_dir"
 jac test
-dist/bundlr-linux-x86_64/bundlr --diagnose
-jac run scripts/smoke.jac --runtime dist/bundlr-linux-x86_64 --browser
+"$release_dir/bundlr-linux-x86_64/bundlr" --diagnose
+jac run scripts/smoke.jac --runtime "$release_dir/bundlr-linux-x86_64" --browser
+BUILD
 ```
 
-The build helper prepares pinned vcpkg libraries and uv, then writes the release
-to `dist/`. Use the matching host target and paths on other platforms.
+Each run uses a fresh output directory because completed releases are never
+overwritten. The helper builds pinned vcpkg dependencies; `jac test` runs native
+contracts against them. Browser smoke tests require Chrome and loopback access.
 
-`jac test` delegates to the native contract suite. Set `BUNDLR_TEST_NATIVE_LIBS`
-for a bundle outside `.build/native/HOST/portable-libs`, and `BUNDLR_TEST_TARGET`
-for cross-compilation. Browser checks require Chrome.
+For cross-builds, pass `--target TARGET --native-libs PATH` with that target's CI
+dependency bundle. Set `BUNDLR_TEST_TARGET` and `BUNDLR_TEST_NATIVE_LIBS` to match
+before `jac test`. Jac compatibility fixes run automatically. Keep a separate,
+absolute `JAC_CACHE_HOME` for each concurrent target.
 
-Build helpers prepare Jac's Windows compiler workaround automatically. For direct
-native builds, first run `jac run scripts/prepare_jac.jac --target TARGET`. Keep an
-absolute `JAC_CACHE_HOME` separate for each concurrent target.
-
-`build.jac --native-libs PATH --target TARGET` accepts a matching dependency bundle.
-`--prepared-uv` reuses verified prepared bytes. `--development-libs PATH` produces
-diagnostic `bundlr-dev-*` builds, not production release evidence.
-
-CI runs on PRs, `main`, version tags, and manual dispatches. It caches dependencies
-and verified runtime archives, builds platforms independently, and checks native,
-browser, GUI, and cross-platform recipient behavior. Require **Production readiness
-(all four hosts)** in branch protection; releases require every check to succeed.
+CI checks all four hosts on PRs, `main`, `v*` tags and manual runs. Pinned compiler,
+native dependencies and compilation outputs are cached. All native, browser, GUI
+and cross-platform recipient checks must pass before tag releases publish.
+Require **Production readiness (all four hosts)** in branch protection.

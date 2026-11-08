@@ -2,6 +2,7 @@
   "jacVersion": "0.39.1",
   "vcpkgBaseline": "9eec002df1cd109f8f104cd966a763daf9751489",
   "maximumArtifactBytes": 52428800,
+  "minimumGlibc": "2.35",
   "llhttpVersion": "9.2.1",
   "acceptance": {
     "blackVersion": "26.5.1",

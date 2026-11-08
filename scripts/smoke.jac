@@ -6,6 +6,7 @@ import os;
 import re;
 import shutil;
 import subprocess;
+import sys;
 import tempfile;
 import time;
 import from pathlib { Path }
@@ -40,9 +41,23 @@ def request(
 }
 
 def browse(args: list[str]) -> str {
-    return subprocess.check_output(
-        ["jac", "browse", "-s", "bundlr-smoke"] + args, text=True, timeout=30
-    ).strip();
+    result = subprocess.run(
+        ["jac", "run", "scripts/browser.jac", "--"] + args,
+        env=dict(os.environ, JACBROWSER_SESSION="bundlr-smoke"),
+        capture_output=True,
+        text=True,
+        timeout=30
+    );
+    if result.returncode != 0 {
+        raise RuntimeError(
+            "jac browse "
+                + " ".join(args)
+                + " failed:\n"
+                + result.stdout
+                + result.stderr
+        );
+    }
+    return result.stdout.strip();
 }
 
 def wait_status(prefix: str, timeout: float = 180.0) -> str {
@@ -86,7 +101,15 @@ def browser_acceptance(origin: str, directory: Path, process: subprocess.Popen[b
         assert process.wait(timeout=20) == 0;
         assert "Bundlr has stopped" in browse(["get", "text", "#status"]);
     } finally {
-        browse(["close"]);
+        failed = sys.exc_info()[0] is not None;
+        try {
+            browse(["close"]);
+        } except Exception as error {
+            if not failed {
+                raise;
+            }
+            print("Browser cleanup failed: " + str(error), file=sys.stderr);
+        }
     }
 }
 
@@ -94,6 +117,7 @@ with entry:__main__ {
     parser = argparse.ArgumentParser();
     parser.add_argument("--runtime", required=True);
     parser.add_argument("--browser", action="store_true");
+    parser.add_argument("--log-directory");
     args = parser.parse_args();
     runtime = Path(args.runtime).resolve();
     binary = runtime / ("bundlr.exe" if os.name == "nt" else "bundlr");
@@ -118,7 +142,9 @@ with entry:__main__ {
         environment["BUNDLR_CACHE_DIRECTORY"] = str(base / "fresh-cache");
         diagnose(damaged / binary.name, environment, False);
         print("Offline tool integrity and cache repair passed.");
-        log = base / "desktop.log";
+        logs = Path(args.log_directory).resolve() if args.log_directory else base;
+        logs.mkdir(parents=True, exist_ok=True);
+        log = logs / "desktop.log";
         with log.open("w") as output {
             server = subprocess.Popen(
                 [str(binary)], env=environment, stdout=output, stderr=subprocess.STDOUT

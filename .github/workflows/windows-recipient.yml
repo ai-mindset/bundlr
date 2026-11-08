@@ -14,11 +14,11 @@ jobs:
   consume:
     runs-on: ${{ inputs.runner }}
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: windows-built-${{ inputs.target }}
           path: applications
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: tests-${{ inputs.target }}
           path: test-download

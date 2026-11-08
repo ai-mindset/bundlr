@@ -16,22 +16,22 @@ jobs:
   smoke:
     runs-on: ${{ inputs.runner }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
       - name: Cache checksum-verified Python archives
-        uses: actions/cache@v5
+        uses: actions/cache@a7833574556fa59680c1b7cb190c1735db73ebf0 # v5.0.0
         with:
           path: .build/python-cache
           key: python-v1-${{ runner.os }}-${{ inputs.target }}-${{ hashFiles('src/core/distribution.jac', 'src/domain/request.jac') }}
           restore-keys: python-v1-${{ runner.os }}-${{ inputs.target }}-
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: bundlr-${{ inputs.target }}
           path: release
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: tests-${{ inputs.target }}
           path: test-download
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: application-fixtures-${{ inputs.target }}
           path: app-download
@@ -70,7 +70,7 @@ jobs:
           Invoke-BundlrNative ./tests/native-test.exe @($env:RUNNER_TEMP)
           Invoke-BundlrNative ./applications/Black-windows-x86_64/Black.exe @('--version')
           Invoke-BundlrNative ./tests/acceptance-test.exe @('all', './bundlr-windows-x86_64/bundlr.exe', '.build/acceptance')
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-built-linux-x86_64
           path: |-
@@ -81,7 +81,7 @@ jobs:
           if-no-files-found: error
           compression-level: 0
         if: inputs.target == 'windows-x86_64'
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-built-macos-arm64
           path: |-
@@ -92,7 +92,7 @@ jobs:
           if-no-files-found: error
           compression-level: 0
         if: inputs.target == 'windows-x86_64'
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-built-macos-x86_64
           path: |-

@@ -171,6 +171,31 @@ def audit_runtime(directory: Path, target: str) {
     ];
     for binary in binaries {
         if target == "linux-x86_64" {
+            maximum = str(
+                json.loads((ROOT / "build-lock.json").read_text())["minimumGlibc"]
+            );
+            ceiling = [int(part) for part in maximum.split(".")] + [0];
+            versions = subprocess.check_output(
+                ["readelf", "--version-info", str(binary)], text=True
+            );
+            for version in re.findall(r"\bGLIBC_([A-Za-z0-9_.]+)", versions) {
+                if re.fullmatch(r"[0-9]+(?:\.[0-9]+)+", version) is None {
+                    raise RuntimeError(
+                        str(binary)
+                            + " has unsupported glibc ABI requirement GLIBC_"
+                            + version
+                    );
+                }
+                required = [int(part) for part in version.split(".")];
+                while len(required) < len(ceiling) {
+                    required.append(0);
+                }
+                if required > ceiling {
+                    raise RuntimeError(
+                        str(binary) + " requires GLIBC_" + version + " above " + maximum
+                    );
+                }
+            }
             linked = subprocess.check_output(["ldd", str(binary)], text=True);
             for line in linked.splitlines() {
                 if "not found" in line {

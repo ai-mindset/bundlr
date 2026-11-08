@@ -9,7 +9,7 @@ name: Native Jac release
   workflow_dispatch: null
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 permissions:
   contents: read
 env:
@@ -20,7 +20,7 @@ jobs:
   verify:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
       - name: Read and check pinned compiler and native baseline
         id: pins
         run: |
@@ -29,13 +29,22 @@ jobs:
           test "$(jq -r '.["builtin-baseline"]' vcpkg.json)" = "$VCPKG_BASELINE"
           test "$(jq -r .llhttpVersion build-lock.json)" = "$(jq -r '.overrides[] | select(.name == "llhttp") | .version' vcpkg.json)"
           jq -r '"jac-version=\(.jacVersion)\nvcpkg-baseline=\(.vcpkgBaseline)"' build-lock.json >> "$GITHUB_OUTPUT"
-      - name: Install pinned Jac
+      - name: Cache pinned workflow linter
+        id: actionlint-cache
+        uses: actions/cache@a7833574556fa59680c1b7cb190c1735db73ebf0 # v5.0.0
+        with:
+          path: .build/actionlint
+          key: actionlint-v1-${{ runner.os }}-${{ runner.arch }}-1.7.12
+      - name: Install pinned workflow linter
+        if: steps.actionlint-cache.outputs.cache-hit != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o /tmp/install-jac.sh
-          bash /tmp/install-jac.sh --version "$JAC_VERSION"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          GOTOOLCHAIN: auto
+        run: GOBIN="$PWD/.build/actionlint" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Lint GitHub Actions workflows
+        run: .build/actionlint/actionlint -color
+      - uses: ./.github/actions/setup-jac
+        with:
+          version: ${{ env.JAC_VERSION }}
       - run: jac run scripts/prepare_uv.jac --target linux-x86_64
       - run: jac fmt --check src scripts tests ui
       - run: jac check src scripts tests ui --lint
@@ -45,7 +54,7 @@ jobs:
         run: |
           jac run scripts/prepare_jac.jac --target windows-x86_64
           jac build --native tests/compiler_probe.jac --target-triple x86_64-pc-windows-msvc -o .build/windows-compiler-probe.exe
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-compiler-probe
           path: .build/windows-compiler-probe.exe
@@ -53,28 +62,9 @@ jobs:
     outputs:
       jac-version: ${{ steps.pins.outputs.jac-version }}
       vcpkg-baseline: ${{ steps.pins.outputs.vcpkg-baseline }}
-  windows-compiler-acceptance:
-    needs: verify
-    runs-on: windows-2022
-    steps:
-      - uses: actions/download-artifact@v7
-        with:
-          name: windows-compiler-probe
-          path: compiler-probe
-      - name: Run compiler acceptance before native dependency builds
-        shell: pwsh
-        run: |
-          Write-Host "Running the Windows compiler runtime acceptance"
-          & ./compiler-probe/windows-compiler-probe.exe
-          $compilerExitCode = $LASTEXITCODE
-          if ($compilerExitCode -ne 0) {
-            throw ("Windows compiler runtime failed with exit code {0} (0x{0:X8})" -f $compilerExitCode)
-          }
   # Keep per-target dependencies explicit so a matrix cannot add global barriers.
   build-linux:
-    needs:
-      - verify
-      - windows-compiler-acceptance
+    needs: verify
     uses: ./.github/workflows/build-platform.yml
     with:
       target: linux-x86_64
@@ -84,9 +74,7 @@ jobs:
       jac-version: ${{ needs.verify.outputs.jac-version }}
       vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
   build-windows:
-    needs:
-      - verify
-      - windows-compiler-acceptance
+    needs: verify
     uses: ./.github/workflows/build-platform.yml
     with:
       target: windows-x86_64
@@ -96,9 +84,7 @@ jobs:
       jac-version: ${{ needs.verify.outputs.jac-version }}
       vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
   build-macos-arm64:
-    needs:
-      - verify
-      - windows-compiler-acceptance
+    needs: verify
     uses: ./.github/workflows/build-platform.yml
     with:
       target: macos-arm64
@@ -108,9 +94,7 @@ jobs:
       jac-version: ${{ needs.verify.outputs.jac-version }}
       vcpkg-baseline: ${{ needs.verify.outputs.vcpkg-baseline }}
   build-macos-x86_64:
-    needs:
-      - verify
-      - windows-compiler-acceptance
+    needs: verify
     uses: ./.github/workflows/build-platform.yml
     with:
       target: macos-x86_64
@@ -125,21 +109,17 @@ jobs:
     env:
       BUNDLR_PYTHON_CACHE_DIRECTORY: ${{ github.workspace }}/.build/python-cache
     steps:
-      - uses: actions/checkout@v6
-      - name: Install pinned Jac
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o /tmp/install-jac.sh
-          bash /tmp/install-jac.sh --version "$JAC_VERSION"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: ./.github/actions/setup-jac
+        with:
+          version: ${{ env.JAC_VERSION }}
       - name: Cache checksum-verified Python archives
-        uses: actions/cache@v5
+        uses: actions/cache@a7833574556fa59680c1b7cb190c1735db73ebf0 # v5.0.0
         with:
           path: .build/python-cache
           key: python-v1-${{ runner.os }}-linux-x86_64-${{ hashFiles('src/core/distribution.jac', 'src/domain/request.jac') }}
           restore-keys: python-v1-${{ runner.os }}-linux-x86_64-
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: bundlr-linux-x86_64
           path: release
@@ -148,70 +128,60 @@ jobs:
           mkdir -p dist
           tar -xzf release/bundlr-linux-x86_64.tar.gz -C dist
       - name: Check browser UI, live packaging, cancellation and shutdown
+        shell: bash
         run: |
+          mkdir -p .build/browser-logs
           BUNDLR_SMOKE_CHROME="$(command -v google-chrome)"
           export BUNDLR_SMOKE_CHROME
-          export BUNDLR_SMOKE_CHROME_LOG="$RUNNER_TEMP/bundlr-chrome.log"
+          "$BUNDLR_SMOKE_CHROME" --version | tee .build/browser-logs/chrome-version.log
+          export BUNDLR_SMOKE_CHROME_LOG="$PWD/.build/browser-logs/chrome.log"
           cat > "$RUNNER_TEMP/bundlr-chrome" <<'BROWSER'
           #!/bin/sh
           exec "$BUNDLR_SMOKE_CHROME" "$@" 2>>"$BUNDLR_SMOKE_CHROME_LOG"
           BROWSER
           chmod +x "$RUNNER_TEMP/bundlr-chrome"
           export JACBROWSER_CHROME="$RUNNER_TEMP/bundlr-chrome"
-          if ! jac run scripts/smoke.jac --runtime dist/bundlr-linux-x86_64 --browser; then
-            if [ -f "$BUNDLR_SMOKE_CHROME_LOG" ]; then
-              cat "$BUNDLR_SMOKE_CHROME_LOG"
-            fi
-            exit 1
-          fi
-  linux-fixture-linux:
+          export JACBROWSER_CACHE="$RUNNER_TEMP/bundlr-browser"
+          jac run scripts/smoke.jac --runtime dist/bundlr-linux-x86_64 --browser \
+            --log-directory .build/browser-logs 2>&1 | tee .build/browser-logs/smoke.log
+      - name: Preserve browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: browser-diagnostics
+          path: .build/browser-logs
+          retention-days: 7
+  linux-fixtures:
     needs: build-linux
     uses: ./.github/workflows/linux-fixture.yml
-    with:
-      target: linux-x86_64
   smoke-linux:
     needs:
       - build-linux
-      - linux-fixture-linux
+      - linux-fixtures
     uses: ./.github/workflows/smoke-platform.yml
     with:
       target: linux-x86_64
       runner: ubuntu-22.04
-  linux-fixture-windows:
-    needs: build-linux
-    uses: ./.github/workflows/linux-fixture.yml
-    with:
-      target: windows-x86_64
   smoke-windows:
     needs:
       - build-windows
-      - linux-fixture-windows
+      - linux-fixtures
     uses: ./.github/workflows/smoke-platform.yml
     with:
       target: windows-x86_64
       runner: windows-2022
-  linux-fixture-macos-arm64:
-    needs: build-linux
-    uses: ./.github/workflows/linux-fixture.yml
-    with:
-      target: macos-arm64
   smoke-macos-arm64:
     needs:
       - build-macos-arm64
-      - linux-fixture-macos-arm64
+      - linux-fixtures
     uses: ./.github/workflows/smoke-platform.yml
     with:
       target: macos-arm64
       runner: macos-15
-  linux-fixture-macos-x86_64:
-    needs: build-linux
-    uses: ./.github/workflows/linux-fixture.yml
-    with:
-      target: macos-x86_64
   smoke-macos-x86_64:
     needs:
       - build-macos-x86_64
-      - linux-fixture-macos-x86_64
+      - linux-fixtures
     uses: ./.github/workflows/smoke-platform.yml
     with:
       target: macos-x86_64
@@ -245,19 +215,15 @@ jobs:
     if: always()
     needs:
       - verify
-      - windows-compiler-acceptance
       - build-linux
       - build-windows
       - build-macos-arm64
       - build-macos-x86_64
       - browser
-      - linux-fixture-linux
+      - linux-fixtures
       - smoke-linux
-      - linux-fixture-windows
       - smoke-windows
-      - linux-fixture-macos-arm64
       - smoke-macos-arm64
-      - linux-fixture-macos-x86_64
       - smoke-macos-x86_64
       - windows-recipient-linux
       - windows-recipient-macos-arm64
@@ -265,9 +231,17 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Require every production build and acceptance matrix to succeed
+        shell: bash
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
+        run: |
+          {
+            echo '| Required job | Result |'
+            echo '| --- | --- |'
+            jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"' <<< "$RESULTS"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -r 'to_entries[] | select(.value.result != "success") | "::error::Required job \(.key): \(.value.result)"' <<< "$RESULTS"
+          jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs:
@@ -276,26 +250,44 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: bundlr-*
           path: release
           merge-multiple: true
+      - name: Verify the tested release commit and archive checksums
+        run: |
+          git fetch --no-tags origin "refs/tags/$GITHUB_REF_NAME"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          cd release
+          sha256sum --check -- *.sha256
       - name: Publish portable archives, checksums and size reports
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
           # A retry may follow a successful publish whose response was lost.
-          if is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)"; then
-            if [ "$is_draft" != false ]; then
+          if release_metadata="$(gh release view "$GITHUB_REF_NAME" --json isDraft,assets)"; then
+            if [ "$(jq -r .isDraft <<< "$release_metadata")" != false ]; then
               echo "::error::Existing release is a draft; inspect it before retrying."
               exit 1
             fi
             existing_assets="$(mktemp -d "$RUNNER_TEMP/bundlr-release-XXXXXXXX")"
-            gh release download "$GITHUB_REF_NAME" --dir "$existing_assets"
-            diff -qr -- release "$existing_assets"
-            echo "Existing release assets match this verified build."
+            if [ "$(jq '.assets | length' <<< "$release_metadata")" -gt 0 ]; then
+              gh release download "$GITHUB_REF_NAME" --dir "$existing_assets"
+              shopt -s dotglob
+              for asset in "$existing_assets"/*; do
+                cmp -- "$asset" "release/$(basename "$asset")"
+              done
+            fi
+            for asset in release/*; do
+              if [ ! -f "$existing_assets/$(basename "$asset")" ]; then
+                # No --clobber: existing assets must never be overwritten.
+                gh release upload "$GITHUB_REF_NAME" "$asset"
+              fi
+            done
+            echo "Release assets match this verified build; missing assets uploaded."
           else
             gh release create "$GITHUB_REF_NAME" release/* --generate-notes --verify-tag
           fi
