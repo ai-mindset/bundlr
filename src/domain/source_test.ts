@@ -1,0 +1,75 @@
+import { test } from "bun:test";
+import { InvalidPackageSourceError, parsePackageSource } from "./source.ts";
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+test("parses a PyPI requirement", () => {
+  const source = parsePackageSource("  httpie==3.2.4  ");
+  assert(source.kind === "pypi", "expected a PyPI source");
+  assert(
+    source.requirement === "httpie==3.2.4",
+    "requirement should be trimmed",
+  );
+});
+
+test("rejects unpinned requirements and invalid exact versions", () => {
+  for (const value of [
+    "httpie",
+    "httpie>=3",
+    "httpie==*",
+    "httpie==not-a-version",
+    "pkg==1.0; python_version>'3'",
+  ]) {
+    let error: unknown;
+    try {
+      parsePackageSource(value);
+    } catch (caught) {
+      error = caught;
+    }
+    assert(
+      error instanceof InvalidPackageSourceError,
+      `accepted invalid source: ${value}`,
+    );
+  }
+});
+
+test("accepts extras and exact prerelease versions", () => {
+  assert(
+    parsePackageSource("example[test,cli]==1!2.0rc1+local.3").kind === "pypi",
+    "expected pinned extras",
+  );
+});
+
+test("parses an HTTPS Git source", () => {
+  const source = parsePackageSource("git+https://github.com/httpie/cli.git");
+  assert(source.kind === "git", "expected a Git source");
+  assert(source.url.hostname === "github.com", "expected the parsed hostname");
+});
+
+test("rejects an empty source", () => {
+  let error: unknown;
+  try {
+    parsePackageSource("  ");
+  } catch (caught) {
+    error = caught;
+  }
+  assert(
+    error instanceof InvalidPackageSourceError,
+    "expected a source validation error",
+  );
+});
+
+test("rejects an insecure Git URL", () => {
+  let error: unknown;
+  try {
+    parsePackageSource("http://example.com/application.git");
+  } catch (caught) {
+    error = caught;
+  }
+  assert(
+    error instanceof InvalidPackageSourceError,
+    "expected HTTPS to be required",
+  );
+});

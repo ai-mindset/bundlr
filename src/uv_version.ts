@@ -1,0 +1,3 @@
+export const UV_VERSION = "0.11.16";
+export const UV_CHECKSUM_MANIFEST_SHA256 =
+  "8ef7fe76d67be3330e18e8d6ecbbb68f7a1ae46fe31198008170e911ad025c6a";

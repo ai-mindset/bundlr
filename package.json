@@ -1,0 +1,28 @@
+{
+  "name": "bundlr",
+  "version": "0.2.0-dev",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.4-canary.1",
+  "scripts": {
+    "format": "bun fmt src scripts tests package.json tsconfig.json build-lock.json",
+    "test": "bun test src",
+    "test:aot": "bun test --aot src",
+    "prepare:uv": "bun scripts/prepare_uv.ts",
+    "build": "bun scripts/build.ts",
+    "verify:compiled": "bun scripts/verify_compiled.ts",
+    "test:acceptance": "bun scripts/acceptance.ts",
+    "test:browser": "bun scripts/browser_smoke.ts",
+    "start": "bun src/main.ts",
+    "package": "bun src/main.ts",
+    "verify": "bun scripts/check_toolchain.ts && bun fmt --check src scripts tests package.json tsconfig.json build-lock.json && bun check",
+    "typecheck": "bun check"
+  },
+  "dependencies": {
+    "jszip": "file:vendor/jszip"
+  },
+  "devDependencies": {
+    "bun-types": "1.4.2",
+    "@types/node": "26.4.1"
+  }
+}

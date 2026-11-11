@@ -3,5 +3,4 @@ actionlint
 /vendor/uv/
 /node_modules/
 /.agents/
-/.jac/
 /.build/
