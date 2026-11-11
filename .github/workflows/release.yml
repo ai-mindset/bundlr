@@ -19,7 +19,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
-      - run: bun install --production --frozen-lockfile --ignore-scripts
+      - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run prepare:uv
       - run: bun run verify
       - run: bun test src
@@ -33,7 +33,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
-      - run: bun install --production --frozen-lockfile --ignore-scripts
+      - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun scripts/check_toolchain.ts
       - run: bun run prepare:uv
       - name: Stamp tagged version
@@ -102,7 +102,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
-      - run: bun install --production --frozen-lockfile --ignore-scripts
+      - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun scripts/check_toolchain.ts
       - run: bun run prepare:uv
       - name: Stamp tagged version

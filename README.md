@@ -16,7 +16,7 @@ channel moves, verify and update that pin before rebuilding.
 
 ```sh
 export PATH="$HOME/.bun/bin:$PATH"
-bun install --production --frozen-lockfile --ignore-scripts
+bun install --frozen-lockfile --ignore-scripts
 bun run prepare:uv
 bun run verify
 bun test src
