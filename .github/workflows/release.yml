@@ -16,9 +16,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
+      - name: Install pinned Bun
+        shell: bash
+        run: |
+          bundlr_toolchain="$RUNNER_TEMP/bundlr-toolchain"
+          npm install --prefix "$bundlr_toolchain" --no-audit --no-fund "bun@$(tr -d '\r\n' < .bun-version)"
+          echo "$bundlr_toolchain/node_modules/.bin" >> "$GITHUB_PATH"
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run prepare:uv
       - run: bun run verify
@@ -30,9 +33,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
+      - name: Install pinned Bun
+        shell: bash
+        run: |
+          bundlr_toolchain="$RUNNER_TEMP/bundlr-toolchain"
+          npm install --prefix "$bundlr_toolchain" --no-audit --no-fund "bun@$(tr -d '\r\n' < .bun-version)"
+          echo "$bundlr_toolchain/node_modules/.bin" >> "$GITHUB_PATH"
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun scripts/check_toolchain.ts
       - run: bun run prepare:uv
@@ -99,9 +105,12 @@ jobs:
     name: Verify ${{ matrix.target }}
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
+      - name: Install pinned Bun
+        shell: bash
+        run: |
+          bundlr_toolchain="$RUNNER_TEMP/bundlr-toolchain"
+          npm install --prefix "$bundlr_toolchain" --no-audit --no-fund "bun@$(tr -d '\r\n' < .bun-version)"
+          echo "$bundlr_toolchain/node_modules/.bin" >> "$GITHUB_PATH"
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun scripts/check_toolchain.ts
       - run: bun run prepare:uv

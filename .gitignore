@@ -4,3 +4,4 @@ actionlint
 /node_modules/
 /.agents/
 /.build/
+AGENTS.md

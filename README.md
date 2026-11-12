@@ -5,17 +5,15 @@ application for Linux x64, Windows x64, or macOS ARM64/x64. Recipients need neit
 Python, Bun, uv nor Bundlr installed. Bundlr itself is one Bun-compiled executable
 with its browser interface and verified uv payload embedded.
 
-The Bun release candidate is being tested. See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)
-for evidence and remaining checks; older published releases use the previous implementation.
-
 ## Build from source
 
-Requires Bun with `compile --trim`, Git and `tar`. The tested Bun revision is pinned
-in `build-lock.json`; the current compiler is experimental canary. If the canary
-channel moves, verify and update that pin before rebuilding.
+Requires Node.js/npm, Git and `tar`. Install the exact Bun distribution from
+`.bun-version` below; `build-lock.json` verifies its native compiler revision.
+This compiler is an experimental canary with `compile --trim`.
 
 ```sh
-export PATH="$HOME/.bun/bin:$PATH"
+npm install --prefix .build/bun-toolchain --no-audit --no-fund "bun@$(tr -d '\r\n' < .bun-version)"
+export PATH="$PWD/.build/bun-toolchain/node_modules/.bin:$PATH"
 bun install --frozen-lockfile --ignore-scripts
 bun run prepare:uv
 bun run verify
