@@ -69,6 +69,41 @@ verifies and repairs the embedded uv cache offline. `BUNDLR_CACHE_DIRECTORY` and
 `BUNDLR_PYTHON_CACHE_DIRECTORY` select cache locations; an explicit
 `BUNDLR_UV_EXECUTABLE` must match the pinned host checksum.
 
+## Architecture
+
+CLI and browser UI share one TypeScript/Bun builder. It turns a Python project
+into a complete app folder and archive per target. Recipients extract and launch
+the app on bundled Python, without installing Python, Bundlr, Bun or uv separately.
+
+```mermaid
+flowchart TD
+    accTitle: From Python project to portable application
+    accDescr {
+        A pinned PyPI requirement or HTTPS Git project enters Bundlr through
+        the CLI or local browser UI. One shared Bun pipeline uses embedded uv
+        and verified target Python to produce an app folder and archive for
+        each selected target. Recipients extract and launch the app using
+        its bundled Python, without a separate Python installation.
+    }
+
+    Source["Pinned PyPI package<br/>or HTTPS Git project"]
+    Builder["Bundlr builder<br/>CLI or browser UI<br/>Bun + embedded uv"]
+    Artifact["App folder + archive"]
+    Recipient(["Extract and launch<br/>Uses bundled Python"])
+
+    Source --> Builder
+    Builder -->|For each target| Artifact
+    Artifact --> Recipient
+```
+
+The builder validates requests and verifies pinned Python and embedded uv by
+SHA-256. PyPI apps and runtime dependencies require target-compatible wheels.
+Git roots may be built on the builder, but their wheels must be platform-independent.
+
+App folders contain Python, packages, a launcher, manifest, dependency inventory,
+licences and file hashes. Archives use ZIP on Windows and `tar.gz` on Linux/macOS,
+with a SHA-256 checksum for each archive.
+
 ## Acceptance and release
 
 ```sh
