@@ -1,4 +1,4 @@
-# Bundlr
+# Bundlr 📦
 
 Package a pinned Python application from PyPI or HTTPS Git into a self-contained
 application for Linux x64, Windows x64, or macOS ARM64/x64. Recipients need neither
