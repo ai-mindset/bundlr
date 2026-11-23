@@ -18,7 +18,8 @@ check :: proc() -> Error {
         output := b.join(stage, "unit-tests.exe" when ODIN_OS == .Windows else "unit-tests")
         if e := t.command([]string{odin, "test", "src", fmt.aprintf("-o:%s", optimization), "-vet", "-strict-style", fmt.aprintf("-out:%s", output)}); e != nil { return e }
         if e := t.command([]string{odin, "test", "tests", "-define:BUNDLR_EMBED_UV=false", fmt.aprintf("-o:%s", optimization), "-vet", "-strict-style", fmt.aprintf("-out:%s", output)}); e != nil { return e }
-        fmt.printf("Passed: Odin source and harness units (%s)\n", optimization)
+        if e := t.command([]string{odin, "test", "scripts", "-define:BUNDLR_EMBED_UV=false", fmt.aprintf("-o:%s", optimization), "-vet", "-strict-style", fmt.aprintf("-out:%s", output)}); e != nil { return e }
+        fmt.printf("Passed: Odin source, harness and driver units (%s)\n", optimization)
     }
     if e := check_bootstrap(odin, stage); e != nil { return e }
     binary := b.join(stage, t.binary_name())

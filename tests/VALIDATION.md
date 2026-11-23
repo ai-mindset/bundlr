@@ -2,7 +2,7 @@
 
 This checkout is not release-certified. Native Linux checks pass; real packaging,
 Chrome workflows, native Windows/macOS execution and actual Actions evidence are
-still required. Nothing was committed, pushed, tagged or published.
+still required.
 
 ## Native tooling
 
@@ -23,6 +23,31 @@ Odin as packaged application content. Interpreter/resolver regressions run only
 with the downloaded, checksum-verified bundled Python. Browser JavaScript remains
 embedded UI content. Client partial-frame cancellation/retry regressions execute
 inside real Chrome; there is no separate JavaScript runtime.
+
+## Compiler bootstrap banner regression
+
+The reported CI failure occurred after successful archive checksum verification.
+Odin's [pinned version command](https://github.com/odin-lang/Odin/blob/9a6991685ddf663956d9836602eb421e141fc443/src/main.cpp#L4056)
+starts its banner with argv[0]. The installer invoked an absolute path but
+expected the literal command name `odin`, rejecting the correct compiler.
+The native driver's ODIN override had the same defect.
+
+Both guards now ignore the executable label while comparing the complete pinned
+version. Compiler dates, revision and archive hashes remain unchanged.
+Installer failures report expected/received banners or an execution/layout error.
+One driver regression procedure covers absolute paths with spaces, Windows .exe
+names/CRLF and platform path spelling, and rejection of wrong dates, revisions,
+missing executable labels and extra output;
+it runs in both debug and optimized verification, bringing the unit total to 18.
+
+The full native check suite passes with ODIN set to the real compiler's absolute
+path. An offline installer fixture containing that compiler and its standard
+library reproduces the old failure after a valid fixture checksum, then completes
+the fixed pre-copy/post-copy checks in paths with spaces. It also confirms that
+occupied installations are preserved and wrong revisions fail with diagnostics
+before publication. Only the fixture archive digest is substituted in owned test
+copies; production archive pins and downloads are unchanged. Actual Actions
+execution and native installer validation on other hosts remain pending.
 
 ## Candidate and pins
 
@@ -85,11 +110,12 @@ Palette calculations and source checks do not establish rendered accessibility.
 | --- | --- |
 | Odin source units | 14 procedures in debug and optimized builds |
 | Harness protocol units | Three procedures in debug and optimized builds; WebSocket handshake/masking/frame guards, HTTP framing and CDP evaluation parameter encoding |
-| Clean bootstrap | Passed before the theme-only UI update: copies only Odin source and the embedded UI into an owned clean tree, then builds the driver without prepared uv or scripting toolchains |
-| Native integration | Passed before the theme-only UI update: 13 filesystem/process/layout/build cases, plus saturated stdout and stderr cancellation on Linux |
+| Driver units | One procedure in debug and optimized builds; invocation-path banners accepted and mismatched compiler versions rejected |
+| Clean bootstrap | Copies only Odin source and the embedded UI into an owned clean tree, then builds the driver without prepared uv or scripting toolchains |
+| Native integration | 13 filesystem/process/layout/build cases, plus saturated stdout and stderr cancellation on Linux |
 | Compiled integrity | Passed against the retained executable with builder tools absent from PATH |
 | Cross-target source checks | Native developer driver and imported application/tests checked for Windows x64, macOS ARM64 and macOS x64 with vet and strict style |
-| Compiler bootstrap script | Bash syntax checked; occupied-destination refusal checked without downloads |
+| Compiler bootstrap script | Bash syntax and offline real-compiler installation fixture passed; pre/post-copy guards, occupied-destination refusal and wrong-revision diagnostics checked |
 | Workflow | YAML parsed and shell blocks syntax checked; all four jobs and release dependencies retained |
 | Repository cleanup | Source/configuration scan and diff checks; no package manifests, scripting drivers, transpiler configuration or obsolete language source files |
 

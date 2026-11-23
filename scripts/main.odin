@@ -12,12 +12,21 @@ COMPILER_VERSION :: "odin version dev-2026-11-nightly:9a69916"
 COMPILER_REVISION :: "9a6991685ddf663956d9836602eb421e141fc443"
 Error :: b.Error
 
+check_compiler_version :: proc(path, reported: string) -> Error {
+    // The executable label varies with argv[0] and platform path spelling.
+    banner := b.trim(reported)
+    expected := strings.trim_prefix(COMPILER_VERSION, "odin")
+    if len(banner) <= len(expected) || !strings.has_suffix(banner, expected) || strings.contains_any(banner, "\r\n") {
+        return fmt.aprintf("Compiler mismatch for %s: expected %s, received %s", path, COMPILER_VERSION, banner)
+    }
+    return nil
+}
 compiler :: proc() -> (value: string, failure: Error) {
     path := b.env("ODIN")
     if path == "" { path = "odin" }
     version, stderr, e := t.capture([]string{path, "version"})
     if e != nil { return "", fmt.aprintf("Cannot run Odin: %v %s", e, stderr) }
-    if b.trim(version) != COMPILER_VERSION { return "", fmt.aprintf("Compiler mismatch: expected %s, received %s", COMPILER_VERSION, b.trim(version)) }
+    if mismatch := check_compiler_version(path, version); mismatch != nil { return "", mismatch }
     return path, nil
 }
 execute :: proc(args: []string) -> Error {

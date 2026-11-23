@@ -11,6 +11,20 @@ fi
 bundlr_version=$(sed -n 's/^COMPILER_VERSION :: "\([^"]*\)"$/\1/p' "$bundlr_root/scripts/main.odin")
 bundlr_revision=$(sed -n 's/^COMPILER_REVISION :: "\([^"]*\)"$/\1/p' "$bundlr_root/scripts/main.odin")
 [[ -n "$bundlr_version" && ${#bundlr_revision} -eq 40 ]]
+bundlr_check_compiler() {
+  local bundlr_executable=$1 bundlr_actual bundlr_expected
+  if ! bundlr_actual=$("$bundlr_executable" version); then
+    printf 'Cannot run Odin compiler: %s\n' "$bundlr_executable" >&2
+    return 1
+  fi
+  # Ignore only the executable label; Git Bash can also change its path spelling.
+  bundlr_actual=${bundlr_actual%$'\r'}
+  bundlr_expected=${bundlr_version#odin}
+  if [[ "$bundlr_actual" != *"$bundlr_expected" || "$bundlr_actual" == "$bundlr_expected" || "$bundlr_actual" == *$'\n'* || "$bundlr_actual" == *$'\r'* ]]; then
+    printf 'Compiler mismatch: expected <%s>, received <%s> (executable: %s)\n' "$bundlr_version" "$bundlr_actual" "$bundlr_executable" >&2
+    return 1
+  fi
+}
 mkdir -p "$bundlr_root/.build"
 bundlr_stage=$(mktemp -d "$bundlr_root/.build/odin-install-XXXXXX")
 bundlr_reserved=false
@@ -66,12 +80,15 @@ if [[ -n ${bundlr_archive:-} ]]; then
   fi
   bundlr_compiler=$(find "$bundlr_stage/extracted" -type f -name "$bundlr_name")
 fi
-[[ -f "$bundlr_compiler" && "$bundlr_compiler" != *$'\n'* ]]
-[[ "$("$bundlr_compiler" version)" == "$bundlr_version" ]]
+if [[ ! -f "$bundlr_compiler" || "$bundlr_compiler" == *$'\n'* ]]; then
+  printf 'Expected exactly one %s compiler in the verified distribution.\n' "$bundlr_name" >&2
+  exit 1
+fi
+bundlr_check_compiler "$bundlr_compiler"
 # Reserve without replacement, then populate only the directory owned here.
 mkdir "$bundlr_destination"
 bundlr_reserved=true
 cp -R -P "$(dirname -- "$bundlr_compiler")/." "$bundlr_destination/"
-[[ "$("$bundlr_destination/$bundlr_name" version)" == "$bundlr_version" ]]
+bundlr_check_compiler "$bundlr_destination/$bundlr_name"
 bundlr_complete=true
 printf '%s\n' "$bundlr_destination"

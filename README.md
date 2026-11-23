@@ -14,6 +14,7 @@ runtime, package manager or second language toolchain to install for development
 Install the pinned Odin compiler: `odin version dev-2026-11-nightly:9a69916`,
 commit `9a6991685ddf663956d9836602eb421e141fc443`. The compiler and standard library
 are pinned together in `scripts/main.odin`; builds reject another revision.
+Set `ODIN` to select a compiler path; paths containing spaces are supported.
 Git and `tar` are host prerequisites. Linux uses system `libcurl.so.4`, macOS
 uses system libcurl, and Windows links the pinned Odin distribution's curl
 libraries. No OS packages are installed automatically.
@@ -130,8 +131,8 @@ odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- acceptance 
 odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- browser dist/bundlr-linux-x86_64
 ```
 
-`check` runs debug/optimized source and protocol tests, a clean developer-tool
-bootstrap without prepared payloads, real filesystem/process integration, a
+`check` runs debug/optimized source, protocol and compiler-guard tests, a clean
+developer-tool bootstrap without prepared payloads, real filesystem/process integration, a
 fresh application build and compiled integrity. It removes only its owned
 working directory. `verify` checks CLI validation, uv extraction, cache repair,
 permissions, symlinks, override identity and embedded-payload tampering with
