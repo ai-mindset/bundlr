@@ -48,30 +48,31 @@ expect :: proc(condition: bool, message: string) -> Error {
     if !condition { return message }
     return nil
 }
-absolute :: proc(path: string) -> (value: string, failure: Error) {
-    return b.absolute_path(path)
-}
 temporary :: proc(parent := "", prefix := "bundlr-test-") -> (value: string, failure: Error) {
     result, e := os.make_directory_temp(parent, prefix, context.allocator)
     if e != nil { return "", "Cannot create owned temporary directory." }
-    return absolute(result)
+    return b.absolute_path(result)
 }
 environment :: proc(overrides: map[string]string, remove: []string = nil, inherit := true) -> []string {
-    values: [dynamic]string
-    if inherit {
-        inherited, _ := os.environ(context.allocator)
-        for entry in inherited {
-            eq := strings.index(entry, "=")
-            if eq < 1 { append(&values, entry); continue }
-            key := strings.to_upper(entry[:eq])
+    inherited: []string
+    if inherit { inherited, _ = os.environ(context.allocator) }
+    return override_environment(inherited, overrides, remove)
+}
+override_environment :: proc(values: []string, overrides: map[string]string, remove: []string = nil) -> []string {
+    result: [dynamic]string
+    for value in values {
+        eq := strings.index(value, "=")
+        if eq > 0 {
+            key := strings.to_upper(value[:eq])
             skip := false
             for replacement in overrides { if strings.to_upper(replacement) == key { skip = true } }
             for removed in remove { if strings.to_upper(removed) == key { skip = true } }
-            if !skip { append(&values, entry) }
+            if skip { continue }
         }
+        append(&result, value)
     }
-    for key, value in overrides { append(&values, fmt.aprintf("%s=%s", key, value)) }
-    return values[:]
+    for key, value in overrides { append(&result, fmt.aprintf("%s=%s", key, value)) }
+    return result[:]
 }
 recipient_environment :: proc(extra: map[string]string = nil) -> []string {
     values := map[string]string{"PATH" = "", "PYTHONHOME" = "bundlr-ignore-host-python", "PYTHONPATH" = "bundlr-ignore-host-packages"}

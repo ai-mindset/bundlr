@@ -8,7 +8,7 @@ import "core:strings"
 
 Git_Fixture :: struct { source: string, environment: []string }
 file_uri :: proc(path: string) -> (value: string, failure: Error) {
-    full := absolute(path) or_return
+    full := b.absolute_path(path) or_return
     full = b.replace(full, "\\", "/")
     when ODIN_OS == .Windows { full = fmt.aprintf("/%s", full) }
     hex := "0123456789ABCDEF"
@@ -44,11 +44,11 @@ fixture_pins :: proc(source: string) -> string {
     return b.replace(b.replace(source, "24.2", PACKAGING_VERSION), "0.4.6", COLORAMA_VERSION)
 }
 packaging_acceptance :: proc(requested, evidence: string, all: bool) -> Error {
-    binary := absolute(requested) or_return
+    binary := b.absolute_path(requested) or_return
     base := evidence
     keep := base != ""
     if !keep { base = temporary() or_return }
-    else { if e := b.absent(base); e != nil { return e }; if e := b.mkdir(base); e != nil { return e }; base = absolute(base) or_return }
+    else { if e := b.absent(base); e != nil { return e }; if e := b.mkdir(base); e != nil { return e }; base = b.absolute_path(base) or_return }
     defer { if !keep { _ = os.remove_all(base) } }
     cache := b.join(base, "tool-cache")
     python_cache := b.env("BUNDLR_PYTHON_CACHE_DIRECTORY")
@@ -73,7 +73,7 @@ packaging_acceptance :: proc(requested, evidence: string, all: bool) -> Error {
             extension := ".zip" if target == "windows-x86_64" else ".tar.gz"
             archive := b.join(output, fmt.aprintf("%s-%s%s", name, target, extension))
             selected_source := fixture.source if i == 1 else ""
-            artifact := verify_recipient(archive, b.join(base, fmt.aprintf("extracted-%s-%s", name, target)), name, target, selected_source, target == b.host_target()) or_return
+            artifact := verify_recipient(archive, b.join(base, fmt.aprintf("relocated %s %s", name, target)), name, target, selected_source, target == b.host_target()) or_return
             if i == 0 && target == b.host_target() { native_runtime = b.join(resources(artifact, target), "runtime") }
             checksum := b.file_hash(archive) or_return
             _, _, collision := capture(args, build_env)
@@ -96,7 +96,7 @@ packaging_acceptance :: proc(requested, evidence: string, all: bool) -> Error {
     ambiguous_files := b.files_in(ambiguous_output) or_return
     if len(ambiguous_files) != 0 { return "Ambiguous command left an artifact." }
     if native_runtime == "" { return "Native recipient runtime was not exercised." }
-    if e := managed_checks(native_runtime); e != nil { return e }
+    if e := dependency_regressions(native_runtime); e != nil { return e }
     when ODIN_OS == .Windows {
         output := b.join(base, "windowed")
         if e := command([]string{binary, "--name", "GitWindow", "--command", "git-window", "--kind", "windowed", "--output", output, fixture.source}, append_env); e != nil { return e }
@@ -108,19 +108,75 @@ packaging_acceptance :: proc(requested, evidence: string, all: bool) -> Error {
     fmt.println("Production builder, managed resolver and native recipient acceptance passed:", b.host_target())
     return nil
 }
-override_environment :: proc(values: []string, overrides: map[string]string, remove: []string = nil) -> []string {
-    result: [dynamic]string
-    for value in values {
-        eq := strings.index(value, "=")
-        if eq > 0 {
-            key := strings.to_upper(value[:eq])
-            skip := false
-            for replacement in overrides { if strings.to_upper(replacement) == key { skip = true } }
-            for removed in remove { if strings.to_upper(removed) == key { skip = true } }
-            if skip { continue }
-        }
-        append(&result, value)
+
+GIT_APPLICATION :: `import os
+import sys
+import subprocess
+from pathlib import Path
+
+def main():
+    assert sys.flags.isolated and sys.flags.ignore_environment
+    import pip, bundlr_pth
+    assert pip.identity == 'application package' and bundlr_pth.identity == 'pth package'
+    assert Path(sys.argv[0]).name == 'git-demo', sys.argv
+    assert Path(sys.argv[0]).parent == Path(__file__).parent.parent, sys.argv
+    assert sys.argv[1:] == ['literal spaces; $(safe)', 'quoted "value"', '', 'é漢字'], sys.argv
+    import packaging
+    if sys.platform == 'win32':
+        import colorama
+        assert colorama.__version__ == '0.4.6'
+    assert packaging.__version__ == '24.2'
+    if sys.platform != 'win32':
+        subprocess.run([str(Path(__file__).with_name('packaged-helper'))], check=True)
+    print('Bundlr Git acceptance: ' + sys.platform)
+    return 0
+
+def window():
+    assert sys.flags.isolated and sys.flags.ignore_environment
+    assert Path(sys.argv[0]).name == 'git-window', sys.argv
+    assert Path(sys.argv[0]).parent == Path(__file__).parent.parent, sys.argv
+    assert sys.argv[1:] == [], sys.argv
+    import tkinter
+    root = tkinter.Tk()
+    root.title('Bundlr GUI acceptance')
+    tkinter.Label(root, text='Bundlr GUI acceptance').pack()
+    def complete():
+        Path(os.environ['BUNDLR_GUI_MARKER']).write_text('tkinter event loop passed')
+        root.destroy()
+    root.after(100, complete)
+    root.mainloop()
+    return 0
+`
+
+GIT_BACKEND :: `from pathlib import Path
+import base64
+import hashlib
+import zipfile
+
+def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+    name = 'bundlr_acceptance-1.0.0-py3-none-any.whl'
+    info = 'bundlr_acceptance-1.0.0.dist-info/'
+    files = {
+        'application.py': Path(__file__).with_name('application.py').read_bytes(),
+        'pip/__init__.py': b"identity = 'application package'\n",
+        'extras/bundlr_pth.py': b"identity = 'pth package'\n",
+        'extras.pth': b'extras\n',
+        'packaged-helper': b'#!/bin/sh\necho "Packaged executable helper passed"\n',
+        info + 'METADATA': b'Metadata-Version: 2.3\nName: bundlr-acceptance\nVersion: 1.0.0\nRequires-Python: >=3.12\nRequires-Dist: packaging==24.2\nRequires-Dist: colorama==0.4.6; sys_platform == "win32"\n',
+        info + 'WHEEL': b'Wheel-Version: 1.0\nGenerator: bundlr-acceptance\nRoot-Is-Purelib: PURELIB\nTag: py3-none-any\n',
+        info + 'entry_points.txt': b'[console_scripts]\ngit-demo = application:main\n[gui_scripts]\ngit-window = application:window\n',
+        info + 'LICENSE': b'Bundlr synthetic acceptance fixture.\n',
     }
-    for key, value in overrides { append(&result, fmt.aprintf("%s=%s", key, value)) }
-    return result[:]
-}
+    record = []
+    for path, data in files.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b'=').decode()
+        record.append(path + ',sha256=' + digest + ',' + str(len(data)))
+    files[info + 'RECORD'] = ('\n'.join(record) + '\n' + info + 'RECORD,,\n').encode()
+    with zipfile.ZipFile(Path(wheel_directory) / name, 'w') as archive:
+        for path, data in files.items():
+            item = zipfile.ZipInfo(path)
+            item.create_system = 3
+            item.external_attr = (0o100755 if path == 'packaged-helper' else 0o100644) << 16
+            archive.writestr(item, data)
+    return name
+`

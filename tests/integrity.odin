@@ -9,7 +9,7 @@ import "core:os"
 import "core:strings"
 
 verify :: proc(requested: string) -> Error {
-    binary := absolute(requested) or_return
+    binary := b.absolute_path(requested) or_return
     base := temporary() or_return
     defer os.remove_all(base)
     cache := b.join(base, "cache")

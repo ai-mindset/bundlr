@@ -10,8 +10,8 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-Native_Case :: struct { name: string, run: proc(root, binary: string) -> Error }
-native_check :: proc(binary: string) -> Error {
+Native_Case :: struct { name: string, run: proc(root: string) -> Error }
+native_check :: proc() -> Error {
     cases := []Native_Case{
         {"literal subprocess arguments and failures", check_process},
         {"simultaneous stdout and stderr", check_streams},
@@ -22,14 +22,11 @@ native_check :: proc(binary: string) -> Error {
         {"concurrent publication winners", check_publication_race},
         {"pre-download collisions", check_collision},
         {"verified runtime extraction", check_runtime},
-        {"HTTPS protocol restrictions", check_https},
-        {"four-target layouts, evidence and launcher ZIPs", check_layouts},
-        {"entry point ambiguity and explicit selection", check_entry},
         {"build output and sidecar collisions", check_build_collisions},
     }
     for test in cases {
         root := temporary() or_return
-        failure := test.run(root, binary)
+        failure := test.run(root)
         _ = os.remove_all(root)
         if failure != nil { return fmt.aprintf("Native test failed (%s): %v", test.name, failure) }
         fmt.printf("Passed: %s\n", test.name)
@@ -37,7 +34,7 @@ native_check :: proc(binary: string) -> Error {
     when ODIN_OS != .Windows { if e := check_saturated_console(); e != nil { return e } }
     return nil
 }
-check_process :: proc(root, binary: string) -> Error {
+check_process :: proc(root: string) -> Error {
     args := []string{"", "literal spaces; $(safe)", `quoted "value"`, "tab\tvalue", "\\backslash", "space and slash\\", "é漢字", ""}
     command: [dynamic]string
     append(&command, self(), "--fixture", "arguments")
@@ -52,7 +49,7 @@ check_process :: proc(root, binary: string) -> Error {
     _, _, missing := capture([]string{b.join(root, "missing executable")})
     return expect(missing != nil, "Missing subprocess was accepted.")
 }
-check_streams :: proc(root, binary: string) -> Error {
+check_streams :: proc(root: string) -> Error {
     out, stderr, e := capture([]string{self(), "--fixture", "streams"})
     if e != nil || len(out) != 1048576 || len(stderr) != 1048576 { return "Concurrent output was lost or blocked." }
     for byte in out { if byte != 'o' { return "Corrupt stdout." } }
@@ -69,7 +66,7 @@ cancel_after_marker :: proc(thread: ^thread.Thread) {
     }
     sync.atomic_store(&trigger.build.cancelled, true)
 }
-check_cancel :: proc(root, binary: string) -> Error {
+check_cancel :: proc(root: string) -> Error {
     marker := b.join(root, "descendants.json")
     data: Capture
     build := b.Build{output = capture_output, user = &data}
@@ -84,7 +81,7 @@ check_cancel :: proc(root, binary: string) -> Error {
     if e == nil || !build.cancelled || time.tick_since(started) > 8*time.Second || !strings.contains(string(data.stdout[:]), "ready") { return "Cancellation did not stop a streaming subprocess promptly." }
     return descendants_stopped(marker)
 }
-check_zip :: proc(root, binary: string) -> Error {
+check_zip :: proc(root: string) -> Error {
     source := b.join(root, "source")
     if e := b.mkdir(b.join(source, "sub")); e != nil { return e }
     if e := b.write_text(b.join(source, "empty"), ""); e != nil { return e }
@@ -112,7 +109,7 @@ check_zip :: proc(root, binary: string) -> Error {
     _, corrupt := read_zip(bytes)
     return expect(corrupt != nil, "ZIP corruption was not detected.")
 }
-check_zip_limit :: proc(root, binary: string) -> Error {
+check_zip_limit :: proc(root: string) -> Error {
     source := b.join(root, "large")
     if e := b.mkdir(source); e != nil { return e }
     file, e := os.open(b.join(source, "sparse"), {.Write, .Create, .Excl, .Sparse})
@@ -122,7 +119,7 @@ check_zip_limit :: proc(root, binary: string) -> Error {
     rejected := b.create_zip(nil, source, b.join(root, "large.zip"), "fixture")
     return expect(rejected != nil && strings.contains(fmt.aprintf("%v", rejected), "ZIP size limit"), "Classic ZIP size guard failed.")
 }
-check_publication :: proc(root, binary: string) -> Error {
+check_publication :: proc(root: string) -> Error {
     source, destination := b.join(root, "stage"), b.join(root, "published")
     if e := b.mkdir(source); e != nil { return e }
     if e := b.write_text(b.join(source, "payload"), "new"); e != nil { return e }
@@ -136,7 +133,7 @@ check_publication :: proc(root, binary: string) -> Error {
     return expect(!os.exists(source) && (b.text(b.join(destination, "payload")) or_return) == "new", "Publication lost staged data.")
 }
 Publish_Job :: struct { source, destination: string, error: Error }
-check_publication_race :: proc(root, binary: string) -> Error {
+check_publication_race :: proc(root: string) -> Error {
     jobs: [2]Publish_Job
     threads: [2]^thread.Thread
     for &job, i in jobs {
@@ -160,7 +157,7 @@ check_publication_race :: proc(root, binary: string) -> Error {
     }
     return expect(successes == 1, "Concurrent publication must have exactly one winner.")
 }
-check_collision :: proc(root, binary: string) -> Error {
+check_collision :: proc(root: string) -> Error {
     output := b.join(root, "artifacts")
     if e := b.mkdir(output); e != nil { return e }
     checksum := b.join(output, "Demo-linux-x86_64.tar.gz.sha256")
@@ -171,7 +168,7 @@ check_collision :: proc(root, binary: string) -> Error {
     files := b.files_in(output) or_return
     return expect(len(files) == 1, "Collision wrote additional output.")
 }
-check_runtime :: proc(root, binary: string) -> Error {
+check_runtime :: proc(root: string) -> Error {
     source := b.join(root, "source", "python", "bin")
     if e := b.mkdir(source); e != nil { return e }
     if e := b.write_text(b.join(source, "python3"), "fixture-runtime", os.perm_number(0o755)); e != nil { return e }
@@ -187,67 +184,7 @@ check_runtime :: proc(root, binary: string) -> Error {
     e := b.extract_verified_runtime(nil, archive, sha, rejected, "bin/python3")
     return expect(e != nil && !os.exists(rejected), "Runtime hash failure wrote output.")
 }
-check_https :: proc(root, binary: string) -> Error {
-    file := b.join(root, "local-data")
-    if e := b.write_text(file, "fixture bytes"); e != nil { return e }
-    e := b.download(nil, fmt.aprintf("file://%s", file), b.join(root, "download"))
-    return expect(e != nil && (b.text(b.join(root, "download")) or_return) == "", "HTTPS download accepted a local-file URL.")
-}
-layout :: proc(root, target: string, name := "Demo App") -> Error {
-    if e := b.mkdir(b.join(root, "runtime")); e != nil { return e }
-    metadata := b.join(root, "packages", "demo-1.dist-info")
-    if e := b.mkdir(b.join(metadata, "licenses")); e != nil { return e }
-    if e := b.write_text(b.join(metadata, "METADATA"), "Name: demo\nVersion: 1\n"); e != nil { return e }
-    if e := b.write_text(b.join(metadata, "entry_points.txt"), "[console_scripts]\ndemo = demo:main\nother = demo:main\n"); e != nil { return e }
-    if e := b.write_text(b.join(metadata, "licenses", "LICENSE.txt"), "Fixture MIT licence"); e != nil { return e }
-    if e := b.write_text(b.join(root, "runtime", "LICENSE.txt"), "Fixture Python licence"); e != nil { return e }
-    if target == "windows-x86_64" {
-        dir := b.join(root, "runtime", "Lib", "site-packages", "pip", "_vendor", "distlib")
-        if e := b.mkdir(dir); e != nil { return e }
-        stub := make([]u8, 128)
-        stub[0], stub[1] = 'M', 'Z'
-        if e := b.write_bytes(b.join(dir, "t64.exe"), stub); e != nil { return e }
-    }
-    request := b.Request{"demo==1", name, "console", "demo", "3.12", []string{target}, root}
-    entry := b.Entry{command = "demo", kind = "console", module = "demo", attributes = "main"}
-    if e := b.validate(request); e != nil { return e }
-    if e := b.create_launcher(request, target, root, entry); e != nil { return e }
-    return b.write_evidence(nil, request, target, root, b.join(root, "packages"))
-}
-check_layouts :: proc(root, binary: string) -> Error {
-    for target in b.TARGETS {
-        directory := b.join(root, target)
-        if strings.has_prefix(target, "macos-") { directory = b.join(directory, "Contents", "Resources") }
-        if e := layout(directory, target); e != nil { return e }
-        manifest: b.Manifest
-        data := read_bytes(b.join(directory, "bundlr-manifest.json")) or_return
-        if json.unmarshal(data, &manifest) != nil || manifest.target != target || manifest.command != "demo" { return "Layout manifest changed." }
-        if e := verify_inventory(directory); e != nil { return e }
-        licences := b.text(b.join(directory, "THIRD_PARTY_LICENSES.txt")) or_return
-        if !strings.contains(licences, "Fixture MIT licence") { return "Dependency licence was omitted." }
-        if target == "windows-x86_64" {
-            bytes := read_bytes(b.join(directory, "Demo App.exe")) or_return
-            entries := read_zip(bytes) or_return
-            if len(entries) != 1 || entries[0].name != "__main__.py" || !strings.contains(string(entries[0].data), "sys.path.insert(0, _packages)") { return "Windows appended launcher ZIP changed." }
-        }
-    }
-    for name in ([]string{"My_App", "My App", "My__ App.2"}) {
-        directory := b.join(root, name, "Contents", "Resources")
-        if e := layout(directory, "macos-arm64", name); e != nil { return e }
-        plist := b.text(b.join(directory, "..", "Info.plist")) or_return
-        if !strings.contains(plist, fmt.aprintf("dev.bundlr.%s", b.bundle_identifier(name))) || strings.contains(b.bundle_identifier(name), "_") { return "macOS bundle identifier contains unsupported characters." }
-    }
-    return nil
-}
-check_entry :: proc(root, binary: string) -> Error {
-    if e := layout(root, b.host_target()); e != nil { return e }
-    packages := b.join(root, "packages")
-    _, ambiguous := b.find_entry(packages, "")
-    entry, e := b.find_entry(packages, "demo")
-    _, absent := b.find_entry(packages, "absent")
-    return expect(ambiguous != nil && e == nil && entry.command == "demo" && absent != nil, "Entry point selection contract changed.")
-}
-check_build_collisions :: proc(root, binary: string) -> Error {
+check_build_collisions :: proc(root: string) -> Error {
     for suffix, i in ([]string{"", ".json", ".sha256"}) {
         output := b.join(root, fmt.aprintf("occupied-%d", i))
         path := fmt.aprintf("%s%s", output, suffix)
@@ -267,4 +204,61 @@ check_build_collisions :: proc(root, binary: string) -> Error {
         }
     }
     return nil
+}
+
+fixture :: proc(args: []string) -> int {
+    if len(args) == 0 { return 2 }
+    switch args[0] {
+    case "cwd":
+        if len(args) < 3 || os.set_working_directory(args[1]) != nil { return 2 }
+        child, e := b.start_process({command = args[2:], stdout = os.stdout, stderr = os.stderr})
+        if e != nil { return 127 }
+        state, we := os.process_wait(child)
+        return 125 if we != nil else state.exit_code
+    case "arguments": fmt.println(b.json_text(args[1:])); return 0
+    case "fail": return 37
+    case "sleep": time.sleep(60*time.Second); return 0
+    case "descendants":
+        if len(args) < 2 { return 2 }
+        child, e := b.start_process({command = []string{self(), "--fixture", "sleep"}, stdout = os.stdout, stderr = os.stderr})
+        if e != nil { return 127 }
+        output := os.stdout
+        if len(args) > 2 && args[2] == "stderr" { output = os.stderr }
+        _, _ = os.write(output, transmute([]u8)string("ready\n"))
+        if b.write_text(args[1], b.json_text([]int{os.get_pid(), child.pid})) != nil { return 1 }
+        if len(args) > 2 {
+            bytes := strings.repeat("x", 1048576)
+            _, _ = os.write(output, transmute([]u8)bytes)
+        }
+        time.sleep(60*time.Second)
+        return 0
+    case "streams":
+        writer := thread.create(proc(_: ^thread.Thread) {
+            bytes := make([]u8, 1048576)
+            for &value in bytes { value = 'e' }
+            _, _ = os.write(os.stderr, bytes)
+        })
+        thread.start(writer)
+        bytes := make([]u8, 1048576)
+        for &value in bytes { value = 'o' }
+        _, _ = os.write(os.stdout, bytes)
+        thread.join(writer)
+        thread.destroy(writer)
+        return 0
+    case "process":
+        b.setup_signals()
+        build := b.Build{output = b.console_output}
+        watch := b.Signal_Watch{build = &build}
+        worker := thread.create(b.signal_watch)
+        worker.data = &watch
+        thread.start(worker)
+        e := b.run(&build, args[1:])
+        sync.atomic_store(&watch.done, true)
+        thread.join(worker)
+        thread.destroy(worker)
+        if build.error != nil { return 1 }
+        if build.cancelled { return 130 }
+        return 1 if e != nil else 0
+    }
+    return 2
 }

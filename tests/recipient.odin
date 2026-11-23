@@ -66,7 +66,7 @@ verify_recipient :: proc(archive, extract, name, target: string, source := "", e
         if packaging != PACKAGING_VERSION || (colorama == COLORAMA_VERSION) != (target == "windows-x86_64") { return "", "Target dependency markers or versions changed." }
     }
     if execute {
-        args := []string{launcher(artifact, name, target), "literal spaces; $(safe)", `quoted "value"`}
+        args := []string{launcher(artifact, name, target), "literal spaces; $(safe)", `quoted "value"`, "", "é漢字"}
         expected := "Bundlr Git acceptance:"
         if strings.has_prefix(name, "Black") { args = []string{launcher(artifact, name, target), "--version"}; expected = fmt.aprintf("black, %s", BLACK_VERSION) }
         out, stderr, e := capture(args, recipient_environment())
@@ -81,7 +81,7 @@ consume :: proc(directory: string) -> Error {
     extension := ".zip" if target == "windows-x86_64" else ".tar.gz"
     for name in ([]string{"Black", "GitDemo"}) {
         archive := b.join(directory, fmt.aprintf("%s-%s%s", name, target, extension))
-        _, e := verify_recipient(archive, b.join(base, name), name, target)
+        _, e := verify_recipient(archive, b.join(base, fmt.aprintf("%s relocated", name)), name, target)
         if e != nil { return e }
     }
     fmt.println("Linux-built recipients launched without builder tools:", target)

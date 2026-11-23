@@ -108,7 +108,7 @@ Build_Record :: struct {
     validation: string,
 }
 build :: proc(requested: string) -> Error {
-    output := t.absolute(requested) or_return
+    output := b.absolute_path(requested) or_return
     destinations := [3]string{output, fmt.aprintf("%s.json", output), fmt.aprintf("%s.sha256", output)}
     for path in destinations { if e := b.absent(path); e != nil { return e } }
     odin := compiler() or_return

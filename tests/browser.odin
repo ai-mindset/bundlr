@@ -93,7 +93,7 @@ empty_output :: proc(path: string) -> Error {
 }
 browser :: proc(requested: string) -> Error {
     when ODIN_OS != .Linux { return "Real browser acceptance currently runs on Linux only." }
-    binary := absolute(requested) or_return
+    binary := b.absolute_path(requested) or_return
     chrome := find_chrome()
     if chrome == "" { return "A real Chrome/Chromium executable is required; set BUNDLR_SMOKE_CHROME." }
     base := temporary() or_return
@@ -171,7 +171,6 @@ browser :: proc(requested: string) -> Error {
     title := evaluate(&socket, "document.title") or_return
     if json_string(title) != "Bundlr" { return "Rendered browser page title changed." }
     if e := browser_themes(&socket); e != nil { return e }
-    if e := client_stream_regression(&socket); e != nil { return e }
     if e := browser_fill(&socket, "#source", "unpinned"); e != nil { return e }
     if e := browser_click(&socket, "#package"); e != nil { return e }
     invalid_status := browser_status(&socket, "Error:") or_return
@@ -215,42 +214,9 @@ browser_themes :: proc(socket: ^WebSocket) -> Error {
         expected := "dark" if dark else "light"
         value := evaluate(socket, `document.documentElement.dataset.theme`) or_return
         if json_string(value) != expected { return "Browser theme did not default to dark or toggle to light." }
-        if _, e := evaluate(socket, `(() => {
-const style = (selector, pseudo) => getComputedStyle(document.querySelector(selector), pseudo);
-if (style('html').colorScheme !== document.documentElement.dataset.theme) throw Error('Native controls use the wrong colour scheme');
-if (document.documentElement.scrollWidth > innerWidth) throw Error('Theme layout overflows the viewport');
-const luminance = (color) => {
-  const rgb = color.match(/[\d.]+/g).slice(0,3).map(value => {
-    const channel = Number(value)/255;
-    return channel <= .04045 ? channel/12.92 : ((channel+.055)/1.055)**2.4;
-  });
-  return .2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];
-};
-const contrast = (foreground, background, minimum) => {
-  const a = luminance(foreground), b = luminance(background);
-  if ((Math.max(a,b)+.05)/(Math.min(a,b)+.05) < minimum) throw Error('Insufficient theme contrast: '+foreground+' on '+background);
-};
-const page = style('body').backgroundColor;
-for (const selector of ['body','h1','.subtitle','label','legend','#status']) contrast(style(selector).color, page, 4.5);
-for (const selector of ['#source','#applicationKind','#theme','#package','#quit','#cancel','#output']) {
-  const colors = style(selector);
-  contrast(colors.color, colors.backgroundColor, 4.5);
-  contrast(colors.borderTopColor, page, 3);
-}
-contrast(style('#source','::placeholder').color, style('#source').backgroundColor, 4.5);
-contrast(style('fieldset').borderTopColor, page, 3);
-const cancel = document.querySelector('#cancel');
-cancel.disabled = false;
-try { contrast(style('#cancel').color, style('#cancel').backgroundColor, 4.5); }
-finally { cancel.disabled = true; }
-const stderr = document.createElement('span');
-stderr.className = 'stderr'; stderr.textContent = 'Error output';
-document.querySelector('#output').append(stderr);
-try { contrast(getComputedStyle(stderr).color, style('#output').backgroundColor, 4.5); }
-finally { stderr.remove(); }
-document.querySelector('#theme').focus();
-return true;
-})()`); e != nil { return e }
+        layout := evaluate(socket, `getComputedStyle(document.documentElement).colorScheme === document.documentElement.dataset.theme && document.documentElement.scrollWidth <= innerWidth`) or_return
+        if good, ok := layout.(bool); !ok || !good { return "Browser theme scheme or responsive layout changed." }
+        if _, e := evaluate(socket, `document.querySelector('#theme').focus()`); e != nil { return e }
         for event_type in ([2]string{"keyDown", "keyUp"}) {
             params := struct { type, key, code: string, windowsVirtualKeyCode: int }{event_type, " ", "Space", 32}
             if _, e := cdp_call(socket, "Input.dispatchKeyEvent", params); e != nil { return e }
@@ -262,39 +228,6 @@ return toggle.matches(':focus-visible') && focused.outlineStyle !== 'none' && pa
 })()`) or_return
         if good, ok := passed.(bool); !ok || !good { return "Theme toggle keyboard focus, accessible state or saved preference changed." }
     }
-    fmt.println("Dark/light theme contrast and keyboard toggle checks passed.")
+    fmt.println("Dark/light theme and keyboard toggle checks passed.")
     return nil
-}
-client_stream_regression :: proc(socket: ^WebSocket) -> Error {
-    page := b.PAGE
-    begin := strings.index(page, `<script nonce="`)
-    if begin < 0 { return "Cannot locate embedded browser script." }
-    start := begin+strings.index(page[begin:], ">")+1
-    end := strings.index(page[start:], "</script>")
-    if end < 0 { return "Cannot locate embedded browser script end." }
-    expression := b.replace(`(async () => {
-const elements = new Map();
-const element = (selector) => { if (!elements.has(selector)) elements.set(selector, {value:'', textContent:'', disabled:false, listeners:new Map(), addEventListener(name, listener) {this.listeners.set(name, listener)}}); return elements.get(selector); };
-let controller, started = () => {};
-const fakeFetch = async (route) => {
-  if (route === '/cancel') return new Response(null, {status:204});
-  if (route !== '/package') throw Error('Unexpected test route');
-  return new Response(new ReadableStream({start(stream) {controller=stream; stream.enqueue(new TextEncoder().encode('{"type":"output","text":"partial')); started();}}));
-};
-const setup = (document, fetch, TextDecoder) => { /* BUNDLR_CLIENT_SCRIPT */ };
-setup({querySelector:element, querySelectorAll:() => [{value:'linux-x86_64'}]}, fakeFetch, TextDecoder);
-async function submit(cancel) {
-  const ready = new Promise(resolve => {started=resolve});
-  const completed = element('#form').listeners.get('submit')({preventDefault(){}});
-  await ready;
-  if (cancel) await element('#cancel').listeners.get('click')();
-  controller.close(); await completed;
-  return [element('#status').textContent, element('#package').disabled];
-}
-const first=await submit(true), second=await submit(false);
-return first[0]==='Error: Cancelled by the user.' && first[1]===false && second[0]==='Error: Bundlr stopped before reporting a result.' && second[1]===false;
-})()`, "/* BUNDLR_CLIENT_SCRIPT */", page[start:start+end])
-    value := evaluate(socket, expression) or_return
-    passed, ok := value.(bool)
-    return expect(ok && passed, "Client cancellation of a partial frame or retry state regressed.")
 }

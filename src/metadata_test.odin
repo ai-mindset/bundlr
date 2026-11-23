@@ -21,6 +21,11 @@ entry_selection_and_injection :: proc(t: ^testing.T) {
     }
     code := launcher_python(Entry{module = "demo", attributes = "main", command = "quote\"value"})
     testing.expect(t, strings.contains(code, `"quote\"value"`))
+    for example in ([]struct { name, identifier: string }{
+        {"My_App", "my-app"}, {"My App", "my-app"}, {"My__ App.2", "my-app.2"},
+    }) {
+        testing.expect_value(t, bundle_identifier(example.name), example.identifier)
+    }
 }
 @(test)
 entry_point_whitespace_and_extras :: proc(t: ^testing.T) {

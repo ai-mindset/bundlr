@@ -30,7 +30,7 @@ compiler :: proc() -> (value: string, failure: Error) {
     return path, nil
 }
 execute :: proc(args: []string) -> Error {
-    if len(args) == 0 { return "Use: prepare-uv [--prepared], build [new-output-path], check, verify [binary], acceptance [binary] [new-evidence-directory] [--all-targets], managed, browser [binary], consume <archives>, or stamp-version." }
+    if len(args) == 0 { return "Use: prepare-uv [--prepared], build [new-output-path], check, verify [binary], acceptance [binary] [new-evidence-directory] [--all-targets], browser [binary], consume <archives>, or stamp-version." }
     switch args[0] {
     case "prepare-uv":
         if len(args) > 2 || len(args) == 2 && args[1] != "--prepared" { return "Use: prepare-uv [--prepared]." }
@@ -69,9 +69,6 @@ execute :: proc(args: []string) -> Error {
         path := t.default_binary()
         if len(args) > 1 { path = args[1] }
         return t.browser(path)
-    case "managed":
-        if len(args) != 1 { return "Use: managed." }
-        return t.managed_acceptance()
     }
     return fmt.aprintf("Unknown developer command: %s", args[0])
 }
