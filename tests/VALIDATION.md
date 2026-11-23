@@ -24,6 +24,30 @@ with the downloaded, checksum-verified bundled Python. Browser JavaScript remain
 embedded UI content. Client partial-frame cancellation/retry regressions execute
 inside real Chrome; there is no separate JavaScript runtime.
 
+## Browser smoke HTTP response framing
+
+The reported browser job timed out with an unqualified loopback error. The
+smoke HTTP client waited for EOF even after receiving a complete Content-Length
+body. Chromium's [DevTools JSON handler](https://github.com/chromium/chromium/blob/main/content/browser/devtools/devtools_http_handler.cc)
+uses its [HTTP server](https://github.com/chromium/chromium/blob/main/net/server/http_server.cc),
+which sends length-delimited responses without automatically closing the socket.
+Waiting for closure can therefore time out on /json/list after its body arrived.
+
+The reader now completes when the declared byte count arrives, including empty
+bodies and responses split across reads. Responses without Content-Length still
+require EOF; truncated or malformed framing fails. Existing timeouts and response
+size bounds remain. HTTP failures identify their method/host/path; debugging
+failures identify the WebSocket handshake or CDP method.
+
+A deterministic reader fixture reproduced the old timeout for a complete UTF-8
+body followed by Would_Block instead of EOF. It now passes for both single-byte
+fragments and a single read. Additional regressions cover EOF-delimited bodies,
+204/304 responses, truncation, malformed/duplicate lengths and unsupported transfer
+encoding. The protocol suite now has five procedures, bringing the total to 20
+with source and driver units. These are transport/framing unit checks, not a real
+browser run: the local sandbox still blocks loopback and Flatpak Chromium.
+The actual browser workflow requires a CI rerun.
+
 ## Compiler bootstrap banner regression
 
 The reported CI failure occurred after successful archive checksum verification.
@@ -37,8 +61,8 @@ version. Compiler dates, revision and archive hashes remain unchanged.
 Installer failures report expected/received banners or an execution/layout error.
 One driver regression procedure covers absolute paths with spaces, Windows .exe
 names/CRLF and platform path spelling, and rejection of wrong dates, revisions,
-missing executable labels and extra output;
-it runs in both debug and optimized verification, bringing the unit total to 18.
+missing executable labels and extra output. It runs in both debug and optimized
+verification.
 
 The full native check suite passes with ODIN set to the real compiler's absolute
 path. An offline installer fixture containing that compiler and its standard
@@ -94,8 +118,8 @@ thresholds. The lowest measured ratios are:
 | Dark | 6.97:1 | 4.04:1 | 9.55:1 |
 | Light | 6.15:1 | 3.21:1 | 6.41:1 |
 
-Both embedded scripts pass syntax parsing. All 14 source and three protocol unit
-procedures pass in debug and optimized builds; the new executable builds and
+Both embedded scripts pass syntax parsing. All 14 source, five protocol and one
+driver unit procedures pass in debug and optimized builds; the executable builds and
 passes compiled integrity. Real-browser checks now inspect computed contrast,
 native control schemes, wide/narrow overflow, Space-key toggling, visible focus,
 accessible toggle state and stored preference, including with a light OS scheme.
@@ -109,7 +133,7 @@ Palette calculations and source checks do not establish rendered accessibility.
 | Check | Current evidence |
 | --- | --- |
 | Odin source units | 14 procedures in debug and optimized builds |
-| Harness protocol units | Three procedures in debug and optimized builds; WebSocket handshake/masking/frame guards, HTTP framing and CDP evaluation parameter encoding |
+| Harness protocol units | Five procedures in debug and optimized builds; WebSocket handshake/masking/frame guards, incremental HTTP framing/transport and CDP evaluation parameter encoding |
 | Driver units | One procedure in debug and optimized builds; invocation-path banners accepted and mismatched compiler versions rejected |
 | Clean bootstrap | Copies only Odin source and the embedded UI into an owned clean tree, then builds the driver without prepared uv or scripting toolchains |
 | Native integration | 13 filesystem/process/layout/build cases, plus saturated stdout and stderr cancellation on Linux |

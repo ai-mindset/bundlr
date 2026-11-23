@@ -12,6 +12,7 @@ import "core:strings"
 import "core:time"
 
 Http_Response :: struct { status: int, headers, body: string }
+Socket_Reader :: #type proc(socket: net.TCP_Socket, bytes: []u8) -> (int, net.TCP_Recv_Error)
 dial_loopback :: proc(host: string) -> (socket: net.TCP_Socket, failure: Error) {
     if !strings.has_prefix(host, "127.0.0.1:") { return {}, "Acceptance connections must stay on loopback." }
     result, e := net.dial_tcp_from_hostname_and_port_string(host)
@@ -23,10 +24,10 @@ send_bytes :: proc(socket: net.TCP_Socket, bytes: []u8) -> Error {
     if b.send_socket(socket, string(bytes)) != .Sent { return "Loopback connection closed while sending." }
     return nil
 }
-receive_more :: proc(socket: net.TCP_Socket, bytes: ^[dynamic]u8, started: time.Tick, timeout: time.Duration) -> (closed: bool, failure: Error) {
+receive_more :: proc(socket: net.TCP_Socket, bytes: ^[dynamic]u8, started: time.Tick, timeout: time.Duration, read: Socket_Reader = net.recv_tcp) -> (closed: bool, failure: Error) {
     for time.tick_since(started) < timeout {
         buffer: [8192]u8
-        n, e := net.recv_tcp(socket, buffer[:])
+        n, e := read(socket, buffer[:])
         if n > 0 {
             if len(bytes^)+n > 16*1024*1024 { return false, "Acceptance response exceeds its size bound." }
             append(bytes, ..buffer[:n]); return false, nil
@@ -44,22 +45,36 @@ header_value :: proc(headers, key: string) -> string {
     }
     return ""
 }
-parse_response :: proc(bytes: []u8) -> (response: Http_Response, failure: Error) {
+parse_response :: proc(bytes: []u8, closed := true) -> (response: Http_Response, complete: bool, failure: Error) {
     split := strings.index(string(bytes), "\r\n\r\n")
-    if split < 0 { return response, "Incomplete HTTP response headers." }
+    if split < 0 {
+        if closed { return response, false, "Incomplete HTTP response headers." }
+        return response, false, nil
+    }
     response.headers, response.body = string(bytes[:split]), string(bytes[split+4:])
     lines := strings.split(response.headers, "\r\n")
     first := strings.fields(lines[0])
-    if len(first) < 2 { return response, "Malformed HTTP response." }
+    if len(first) < 2 || first[0] != "HTTP/1.1" && first[0] != "HTTP/1.0" { return response, false, "Malformed HTTP response." }
     status, ok := strconv.parse_int(first[1])
-    if !ok { return response, "Malformed HTTP response status." }
+    if !ok || status < 200 || status > 599 { return response, false, "Unsupported HTTP response status." }
     response.status = status
-    if header_value(response.headers, "transfer-encoding") != "" { return response, "Unexpected encoded HTTP response." }
-    if length := header_value(response.headers, "content-length"); length != "" {
-        size, good := strconv.parse_int(length)
-        if !good || size != len(response.body) { return response, "HTTP response length mismatch." }
+    length := -1
+    for line in lines[1:] {
+        colon := strings.index(line, ":")
+        if colon < 1 { return response, false, "Malformed HTTP response header." }
+        key, value := strings.to_lower(line[:colon]), b.trim(line[colon+1:])
+        switch key {
+        case "transfer-encoding": return response, false, "Unexpected encoded HTTP response."
+        case "content-length":
+            size, good := strconv.parse_int(value)
+            if length >= 0 || !good || !b.regex_match(`^[0-9]+$`, value) || size > 16*1024*1024 { return response, false, "Invalid HTTP response length." }
+            length = size
+        }
     }
-    return response, nil
+    if status == 204 || status == 304 { length = 0 }
+    if length < 0 { return response, closed, nil }
+    if len(response.body) > length || closed && len(response.body) < length { return response, false, "HTTP response length mismatch." }
+    return response, len(response.body) == length, nil
 }
 http_request :: proc(host, route: string, method := "GET", body := "", token := "", origin := "", host_header := "") -> (response: Http_Response, failure: Error) {
     socket := dial_loopback(host) or_return
@@ -69,15 +84,22 @@ http_request :: proc(host, route: string, method := "GET", body := "", token := 
     if token != "" { extra = fmt.aprintf("%sX-Bundlr-Token: %s\r\n", extra, token) }
     if origin != "" { extra = fmt.aprintf("%sOrigin: %s\r\n", extra, origin) }
     request := fmt.aprintf("%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: %d\r\n%s\r\n%s", method, route, declared, len(body), extra, body)
-    if e := send_bytes(socket, transmute([]u8)request); e != nil { return response, e }
+    if e := send_bytes(socket, transmute([]u8)request); e != nil { return response, fmt.aprintf("%s %s%s: %v", method, host, route, e) }
+    response, failure = receive_http_response(socket)
+    if failure != nil { return response, fmt.aprintf("%s %s%s: %v", method, host, route, failure) }
+    return response, nil
+}
+receive_http_response :: proc(socket: net.TCP_Socket, timeout := 10*time.Second, read: Socket_Reader = net.recv_tcp) -> (response: Http_Response, failure: Error) {
     bytes: [dynamic]u8
     started := time.tick_now()
+    closed, complete := false, false
     for {
-        closed, e := receive_more(socket, &bytes, started, 10*time.Second)
-        if e != nil { return response, e }
-        if closed { break }
+        response, complete, failure = parse_response(bytes[:], closed)
+        if failure != nil { return response, failure }
+        if complete { return response, nil }
+        closed, failure = receive_more(socket, &bytes, started, timeout, read)
+        if failure != nil { return response, failure }
     }
-    return parse_response(bytes[:])
 }
 WebSocket :: struct { socket: net.TCP_Socket, input: [dynamic]u8, consumed, next_id: int }
 websocket_connect :: proc(url: string) -> (socket: WebSocket, failure: Error) {
@@ -94,7 +116,7 @@ websocket_connect :: proc(url: string) -> (socket: WebSocket, failure: Error) {
     started := time.tick_now()
     for strings.index(string(socket.input[:]), "\r\n\r\n") < 0 {
         closed, e := receive_more(socket.socket, &socket.input, started, 5*time.Second)
-        if e != nil { return socket, e }
+        if e != nil { return socket, fmt.aprintf("Chrome WebSocket handshake: %v", e) }
         if closed { return socket, "Chrome closed the WebSocket handshake." }
     }
     end := strings.index(string(socket.input[:]), "\r\n\r\n")
@@ -196,10 +218,11 @@ cdp_call :: proc(socket: ^WebSocket, method: string, params: any = struct{}{}) -
     socket.next_id += 1
     id := socket.next_id
     request := cdp_request(id, method, params) or_return
-    if e := websocket_send(socket, 1, request); e != nil { return nil, e }
+    if e := websocket_send(socket, 1, request); e != nil { return nil, fmt.aprintf("Chrome %s: %v", method, e) }
     started := time.tick_now()
     for {
-        text := websocket_message(socket, started) or_return
+        text, e := websocket_message(socket, started)
+        if e != nil { return nil, fmt.aprintf("Chrome %s: %v", method, e) }
         response, pe := json.parse(text, parse_integers = true)
         if pe != .None { return nil, "Malformed Chrome debugging response." }
         object := json_object(response)
