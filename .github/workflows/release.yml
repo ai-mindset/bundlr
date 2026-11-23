@@ -1,7 +1,7 @@
-name: Bun verification and release
+name: Odin verification and release
 on:
   push:
-    branches: [main, bun]
+    branches: [main, rewrite/odin]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -16,47 +16,40 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
-      - name: Install pinned Bun
+      - name: Install dated Odin compiler locally
         shell: bash
         run: |
-          bundlr_toolchain="$RUNNER_TEMP/bundlr-toolchain"
-          npm install --prefix "$bundlr_toolchain" --no-audit --no-fund "bun@$(tr -d '\r\n' < .bun-version)"
-          echo "$bundlr_toolchain/node_modules/.bin" >> "$GITHUB_PATH"
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun run prepare:uv
-      - run: bun run verify
-      - run: bun test src
-      - run: bun test --aot src
+          bash scripts/install_odin.sh
+          echo "$PWD/.build/odin-toolchain" >> "$GITHUB_PATH"
+      - run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- prepare-uv
+      - run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- check
   linux:
     needs: verify
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
-      - name: Install pinned Bun
+      - name: Install dated Odin compiler locally
         shell: bash
         run: |
-          bundlr_toolchain="$RUNNER_TEMP/bundlr-toolchain"
-          npm install --prefix "$bundlr_toolchain" --no-audit --no-fund "bun@$(tr -d '\r\n' < .bun-version)"
-          echo "$bundlr_toolchain/node_modules/.bin" >> "$GITHUB_PATH"
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun scripts/check_toolchain.ts
-      - run: bun run prepare:uv
+          bash scripts/install_odin.sh
+          echo "$PWD/.build/odin-toolchain" >> "$GITHUB_PATH"
+      - run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- prepare-uv
       - name: Stamp tagged version
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           BUNDLR_RELEASE_TAG: ${{ github.ref_name }}
-        run: bun scripts/stamp_version.ts
-      - run: bun run build
-      - run: bun run verify:compiled
+        run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- stamp-version
+      - run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- build
+      - run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- verify
       - name: Test Linux builder and recipients
         if: ${{ !startsWith(github.ref, 'refs/tags/v') && github.event_name != 'workflow_dispatch' }}
-        run: bun scripts/acceptance.ts dist/bundlr-linux-x86_64
+        run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- acceptance dist/bundlr-linux-x86_64
       - name: Test all target packaging for release candidates
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        run: bun scripts/acceptance.ts dist/bundlr-linux-x86_64 .build/acceptance --all-targets
+        run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- acceptance dist/bundlr-linux-x86_64 .build/acceptance --all-targets
       - name: Test real browser workflows
-        run: bun scripts/browser_smoke.ts dist/bundlr-linux-x86_64
+        run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- browser dist/bundlr-linux-x86_64
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: bundlr-linux-x86_64
@@ -105,31 +98,32 @@ jobs:
     name: Verify ${{ matrix.target }}
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
-      - name: Install pinned Bun
+      - name: Install dated Odin compiler locally
         shell: bash
         run: |
-          bundlr_toolchain="$RUNNER_TEMP/bundlr-toolchain"
-          npm install --prefix "$bundlr_toolchain" --no-audit --no-fund "bun@$(tr -d '\r\n' < .bun-version)"
-          echo "$bundlr_toolchain/node_modules/.bin" >> "$GITHUB_PATH"
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun scripts/check_toolchain.ts
-      - run: bun run prepare:uv
+          bash scripts/install_odin.sh
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cygpath -w "$PWD/.build/odin-toolchain" >> "$GITHUB_PATH"
+          else
+            echo "$PWD/.build/odin-toolchain" >> "$GITHUB_PATH"
+          fi
+      - run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- prepare-uv
       - name: Stamp tagged version
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           BUNDLR_RELEASE_TAG: ${{ github.ref_name }}
-        run: bun scripts/stamp_version.ts
-      - run: bun test src/core/process_test.ts
-      - run: bun run build
-      - run: bun run verify:compiled
+        run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- stamp-version
+      - run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- check
+      - run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- build
+      - run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- verify
       - name: Test native builder and recipients
-        run: bun scripts/acceptance.ts dist/${{ matrix.exe }}
+        run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- acceptance dist/${{ matrix.exe }}
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: cross-${{ matrix.target }}
           path: .build/cross
       - name: Run Linux-built recipients on their target host
-        run: bun scripts/consume.ts .build/cross
+        run: odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- consume .build/cross
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: bundlr-${{ matrix.target }}
@@ -157,9 +151,10 @@ jobs:
       - name: Include licence notices
         run: |
           cp LICENSE release/LICENSE
-          cp vendor/jszip/LICENSE.markdown release/JSZip-LICENSE.txt
           cp vendor/uv-LICENSE-MIT.txt release/uv-LICENSE-MIT.txt
           cp vendor/uv-LICENSE-APACHE.txt release/uv-LICENSE-APACHE.txt
+          cp vendor/odin-LICENSE.txt release/odin-LICENSE.txt
+          cp vendor/curl-LICENSE*.txt release/
       - name: Publish tested executables
         env:
           GH_REPO: ${{ github.repository }}

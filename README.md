@@ -1,36 +1,58 @@
 # Bundlr 📦
 
-Package a pinned Python application from PyPI or HTTPS Git into a self-contained
-application for Linux x64, Windows x64, or macOS ARM64/x64. Recipients need neither
-Python, Bun, uv nor Bundlr installed. Bundlr itself is one Bun-compiled executable
-with its browser interface and verified uv payload embedded.
+Bundlr packages a pinned Python application from PyPI or HTTPS Git into a
+self-contained application for Linux x64, Windows x64, or macOS ARM64/x64.
+Recipients need neither Python, uv, Bundlr nor Odin installed.
+
+The builder is a native Odin executable with its browser interface and verified
+uv payload embedded. Its build driver, unit tests, integration checks, archive
+reader, recipient checks and Chrome driver are also Odin. There is no scripting
+runtime, package manager or second language toolchain to install for development.
 
 ## Build from source
 
-Requires Node.js/npm, Git and `tar`. Install the exact Bun distribution from
-`.bun-version` below; `build-lock.json` verifies its native compiler revision.
-This compiler is an experimental canary with `compile --trim`.
+Install the pinned Odin compiler: `odin version dev-2026-11-nightly:9a69916`,
+commit `9a6991685ddf663956d9836602eb421e141fc443`. The compiler and standard library
+are pinned together in `scripts/main.odin`; builds reject another revision.
+Git and `tar` are host prerequisites. Linux uses system `libcurl.so.4`, macOS
+uses system libcurl, and Windows links the pinned Odin distribution's curl
+libraries. No OS packages are installed automatically.
+
+The optional `bash scripts/install_odin.sh` bootstraps the checksum-pinned compiler
+into a new `.build/odin-toolchain` using platform tools. It never replaces an
+existing installation or changes shell profiles. Add that directory to PATH for
+the current shell. Windows bootstrap uses Git Bash and system tar. The pinned
+release has no Intel macOS binary; compiler bootstrap there requires an existing
+LLVM 20 (`LLVM_CONFIG`). An already installed matching Odin needs no bootstrap.
+
+Run from the repository root:
 
 ```sh
-npm install --prefix .build/bun-toolchain --no-audit --no-fund "bun@$(tr -d '\r\n' < .bun-version)"
-export PATH="$PWD/.build/bun-toolchain/node_modules/.bin:$PATH"
-bun install --frozen-lockfile --ignore-scripts
-bun run prepare:uv
-bun run verify
-bun test src
-bun test --aot src
-bun run build
-bun run verify:compiled
+odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- prepare-uv
+odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- build
 ```
 
-On Linux the output is `dist/bundlr-linux-x86_64`, with a `.sha256` checksum and a
-JSON build/size record. Native Windows and macOS builds use their corresponding
-filenames. Existing outputs are never overwritten. For a rebuild, choose a new
-path: `bun scripts/build.ts dist/bundlr-next`.
+The define applies to the developer driver so it can prepare uv in a clean
+checkout. The driver builds the application with embedded uv enabled. An
+application built with embedding disabled refuses to run.
+
+Use `prepare-uv --prepared` to verify existing payload files offline. Preparation
+checks the pinned release's checksum manifest and archive before extracting uv.
+Application builds embed the compressed executable and its provenance, then run
+an offline diagnostic before publishing the executable and its JSON/`.sha256`
+sidecars. Existing outputs are never overwritten. Select a new output path to
+rebuild:
+
+```sh
+odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- build dist/bundlr-next
+```
+
+The default Linux output is `dist/bundlr-linux-x86_64`; Windows/macOS use their
+corresponding native filenames. Bounds checks, vet and strict style stay enabled.
 
 ## Use
 
-Run without arguments for the local browser interface, or use the CLI:
+Run without arguments for the browser interface, or use the CLI:
 
 ```sh
 ./dist/bundlr-linux-x86_64
@@ -46,78 +68,96 @@ For a Windows desktop application built on Linux:
   --target windows-x86_64 pip-ui-tkinter==0.2.0
 ```
 
-Use `--target all` for all four targets. HTTPS Git sources can end in `@revision`;
-use a full commit for reproducible source selection. Dependencies must have wheels
-for the chosen target; Git root wheels must be platform-independent.
+Use `--target all` for all four targets. HTTPS Git sources may end in `@revision`;
+prefer a full commit for reproducibility. Git URLs must be credential-free.
+Dependencies need target-compatible wheels; Git roots must produce portable,
+pure-Python wheels. Git build backends execute project code on the builder.
 
-Packages with several commands require `--command`. Black provides `black` and
-`blackd`; in the browser, enter `black` under **Application entry point**.
-**Cancel** stops the active build; **Quit Bundlr** stops the local server.
+Packages with multiple commands require `--command`. Black has `black` and
+`blackd`; enter `black` under **Application entry point** in the browser.
+**Cancel** stops the build and subprocess descendants. **Quit Bundlr** waits for
+cleanup and shuts down. The browser admits one active build.
 
-Outputs go to `dist/` unless `--output PATH` is supplied. Send the complete client
-archive and its `.sha256` file. For the Linux example, verify before extracting:
+The browser starts in dark mode. Use **Dark mode** to switch themes; your choice
+is remembered for the current browser origin when storage is available. Both
+themes use explicit contrast colours, visible keyboard focus and readable logs.
+
+Output defaults to `dist/`; change it with `--output PATH`. Send the complete
+client archive and its `.sha256` file. Verify before extracting, for example:
 
 ```sh
 (cd dist && sha256sum --check Black-linux-x86_64.tar.gz.sha256)
 ```
 
-Applications include a manifest, dependency inventory, licence notices and
-`SHA256SUMS`. Use [IT_SUPPORT_REPORT.md](IT_SUPPORT_REPORT.md) for support evidence.
-Build on a controlled machine: Bundlr uses the builder's privileges and is not a
-security sandbox. Python/package downloads need network access. `--diagnose`
-verifies and repairs the embedded uv cache offline. `BUNDLR_CACHE_DIRECTORY` and
-`BUNDLR_PYTHON_CACHE_DIRECTORY` select cache locations; an explicit
-`BUNDLR_UV_EXECUTABLE` must match the pinned host checksum.
+Applications include `bundlr-manifest.json`, `bundlr-dependencies.json`,
+`THIRD_PARTY_LICENSES.txt` and `SHA256SUMS`. See
+[IT_SUPPORT_REPORT.md](IT_SUPPORT_REPORT.md) for recipient support evidence.
 
-## Architecture
+`--diagnose` verifies and repairs uv offline. `BUNDLR_CACHE_DIRECTORY` and
+`BUNDLR_PYTHON_CACHE_DIRECTORY` select caches. `BUNDLR_UV_EXECUTABLE` must match
+the pinned host checksum. `BUNDLR_NO_BROWSER=1` suppresses browser opening.
+Python/package downloads need network access.
 
-CLI and browser UI share one TypeScript/Bun builder. It turns a Python project
-into a complete app folder and archive per target. Recipients extract and launch
-the app on bundled Python, without installing Python, Bundlr, Bun or uv separately.
+## Implementation
 
-```mermaid
-flowchart TD
-    accTitle: From Python project to portable application
-    accDescr {
-        A pinned PyPI requirement or HTTPS Git project enters Bundlr through
-        the CLI or local browser UI. One shared Bun pipeline uses embedded uv
-        and verified target Python to produce an app folder and archive for
-        each selected target. Recipients extract and launch the app using
-        its bundled Python, without a separate Python installation.
-    }
+CLI and browser requests share the Odin packaging pipeline. Validation precedes
+output creation. Targets build sequentially, with verified CPython 3.12.13
+archives and uv 0.13.9. Dependency installation cannot fall back to source builds.
+Git roots build separately before target-specific dependency resolution.
 
-    Source["Pinned PyPI package<br/>or HTTPS Git project"]
-    Builder["Bundlr builder<br/>CLI or browser UI<br/>Bun + embedded uv"]
-    Artifact["App folder + archive"]
-    Recipient(["Extract and launch<br/>Uses bundled Python"])
+Recipients use bundled Python in isolated mode, preserve literal arguments and
+work after relocation. Windows uses console/pythonw launcher stubs with appended
+ZIPs; macOS uses application bundles. Windows archives use the native classic
+ZIP writer with size/entry guards; Unix archives use `tar.gz`. Publication stages
+on the output filesystem, refuses replacement and rolls back partial results.
 
-    Source --> Builder
-    Builder -->|For each target| Artifact
-    Artifact --> Recipient
-```
+Python launcher text and Python Git fixture source are application content
+emitted by Odin. Tests that execute it use the downloaded, checksum-verified
+bundled interpreter, never a host Python installation.
 
-The builder validates requests and verifies pinned Python and embedded uv by
-SHA-256. PyPI apps and runtime dependencies require target-compatible wheels.
-Git roots may be built on the builder, but their wheels must be platform-independent.
+The loopback server binds `127.0.0.1` on an ephemeral port and checks the exact
+Host, session token and supplied Origin. It retains CSP nonces, bounded HTTP
+framing, NDJSON backpressure, cancellation and disconnect cleanup.
 
-App folders contain Python, packages, a launcher, manifest, dependency inventory,
-licences and file hashes. Archives use ZIP on Windows and `tar.gz` on Linux/macOS,
-with a SHA-256 checksum for each archive.
+## Verification and release
 
-## Acceptance and release
+The same native driver runs all checks. No package installation is needed:
 
 ```sh
-bun run test:acceptance
-bun run test:browser
+odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- check
+odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- verify dist/bundlr-linux-x86_64
+odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- acceptance dist/bundlr-linux-x86_64
+odin run scripts -vet -strict-style -define:BUNDLR_EMBED_UV=false -- browser dist/bundlr-linux-x86_64
 ```
 
-The browser test requires Chrome/Chromium; set `BUNDLR_SMOKE_CHROME` if necessary.
-For a user-installed Flatpak Brave:
+`check` runs debug/optimized source and protocol tests, a clean developer-tool
+bootstrap without prepared payloads, real filesystem/process integration, a
+fresh application build and compiled integrity. It removes only its owned
+working directory. `verify` checks CLI validation, uv extraction, cache repair,
+permissions, symlinks, override identity and embedded-payload tampering with
+builder tools absent from PATH.
 
-```sh
-BUNDLR_SMOKE_CHROME="$HOME/.local/share/flatpak/exports/bin/com.brave.Browser" bun run test:browser
-```
+`acceptance` packages pinned Black and deterministic Git fixtures, checks
+collisions and artifact evidence, rejects nonportable roots, executes native
+recipients, and tests dependency markers, cycles, source-build prohibition,
+root identity and launcher isolation using verified bundled Python. Windows
+also exercises pythonw/Tk. `managed` runs those interpreter/resolver regressions
+independently after obtaining the verified host runtime.
 
-CI checks Linux on ordinary changes. Manual full runs and version tags also check
-native Windows/macOS builders and execute Linux-built recipients on those hosts.
-Publishing requires every check, including real browser packaging, to pass.
+Append a new evidence directory and `--all-targets` to `acceptance` to retain
+all-target output. On recipient hosts, `consume DIRECTORY` checks matching
+Linux-built archives. `browser` requires real Chrome/Chromium on Linux; select it
+with `BUNDLR_SMOKE_CHROME`. The Odin driver speaks Chrome's debugging protocol
+directly and checks the rendered client, validation, streaming, cancellation,
+concurrency, packaging, recipient execution and shutdown. Client stream-state
+regressions execute inside Chrome, without a separate JavaScript runtime.
+
+CI retains every native, packaging, browser and cross-host release gate. Tagged
+runs stamp `src/common.odin` through the native `stamp-version` command and
+`BUNDLR_RELEASE_TAG`; normal builds do not stamp the checkout. Use
+`git diff --check` when editing source, configuration or documentation.
+
+The rewrite is **not release-certified**. See
+[tests/VALIDATION.md](tests/VALIDATION.md) for current evidence and blocked gates.
+Build on a controlled machine: Bundlr, Git build backends and recipient Python
+are not security sandboxes.
