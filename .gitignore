@@ -1,7 +1,6 @@
 actionlint
 /dist/
 /vendor/uv/
-/node_modules/
 /.agents/
 /.build/
 AGENTS.md
