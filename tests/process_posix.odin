@@ -45,6 +45,10 @@ check_saturated_console :: proc() -> Error {
             if e != nil || n == 0 { break }
         }
         if posix.fcntl(fd, .SETFL, flags) == -1 { return "Cannot restore owned pipe flags." }
+        // Darwin exposes FWASWRITTEN through F_GETFL after the first write.
+        // Compare against the prepared pipe, after our own writes and restore.
+        flags = posix.fcntl(fd, .GETFL, 0)
+        if flags == -1 || flags&posix.O_NONBLOCK != 0 { return "Owned console pipe is not blocking." }
         null, ne := os.open("/dev/null", {.Write})
         if ne != nil { return "Cannot open null output." }
         defer os.close(null)
@@ -64,7 +68,8 @@ check_saturated_console :: proc() -> Error {
         state, we := os.process_wait(child, 5*time.Second)
         if we != nil { return "Cancellation stalled behind a full console pipe." }
         waited = true
-        if state.exit_code != 130 || posix.fcntl(fd, .GETFL, 0) != flags { return "Cancelled console status or inherited pipe flags changed." }
+        if state.exit_code != 130 { return fmt.aprintf("Cancelled %s console exited with %d; expected 130.", stream, state.exit_code) }
+        if actual := posix.fcntl(fd, .GETFL, 0); actual != flags { return fmt.aprintf("Inherited %s pipe flags changed from %d to %d.", stream, flags, actual) }
         if e := descendants_stopped(marker); e != nil { return e }
     }
     fmt.println("Passed: saturated console cancellation and inherited pipe flags")

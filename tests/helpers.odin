@@ -95,9 +95,12 @@ read_bytes :: proc(path: string) -> (value: []u8, failure: Error) {
 }
 // Only callers' owned temporary files may be changed through this helper.
 overwrite :: proc(path: string, data: []u8) -> Error {
-    file, e := os.open(path, {.Write, .Trunc})
-    if e != nil { return "Cannot open owned test file." }
+    // The pinned Windows os.open uses TRUNCATE_EXISTING without GENERIC_WRITE.
+    // Open only an existing file, then truncate through its writable handle.
+    file, e := os.open(path, {.Write})
+    if e != nil { return fmt.aprintf("Cannot open owned test file %s: %v", path, e) }
     defer os.close(file)
+    if te := os.truncate(file, 0); te != nil { return fmt.aprintf("Cannot truncate owned test file %s: %v", path, te) }
     n, we := os.write(file, data)
     if we != nil || n != len(data) { return "Cannot update owned test file." }
     return nil
