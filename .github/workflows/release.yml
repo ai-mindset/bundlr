@@ -91,7 +91,8 @@ jobs:
           - runner: macos-15
             target: macos-arm64
             exe: bundlr-macos-arm64
-          - runner: macos-15-intel
+          # Intel Odin bootstrap requires LLVM 20, preinstalled on macOS 26.
+          - runner: macos-26-intel
             target: macos-x86_64
             exe: bundlr-macos-x86_64
     runs-on: ${{ matrix.runner }}
